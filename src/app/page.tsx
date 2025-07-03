@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef, type ChangeEvent } from 'react';
 import { AITestCase, TestCase, TestCaseStatus } from '@/lib/types';
+import type { FailureReportInput } from '@/ai/flows/generate-failure-report';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -88,6 +89,17 @@ const TestWaveDashboard: React.FC = () => {
   };
 
   const handleUpdate = (id: string, field: keyof TestCase, value: string | TestCaseStatus) => {
+    if (field === 'estado' && value === 'Failed') {
+      const testCase = testCases.find(tc => tc.id === id);
+      if (testCase && (!testCase.comentarios || !testCase.evidencia)) {
+        toast({
+          title: "Information Required",
+          description: "Comments and Evidence are required before marking a test case as Failed.",
+          variant: "destructive",
+        });
+        return; // Prevent status update
+      }
+    }
     setTestCases(prev => prev.map(tc => tc.id === id ? { ...tc, [field]: value } : tc));
   };
 
@@ -220,15 +232,15 @@ const TestCaseTable: React.FC<{testCases: TestCase[], onUpdate: (id: string, fie
         <TableBody>
           {testCases.map((tc) => (
             <TableRow key={tc.id}>
-              <TableCell><Input value={tc.proceso} onChange={e => onUpdate(tc.id, 'proceso', e.target.value)} /></TableCell>
-              <TableCell><Input value={tc.casoPrueba} onChange={e => onUpdate(tc.id, 'casoPrueba', e.target.value)} /></TableCell>
+              <TableCell>{tc.proceso}</TableCell>
+              <TableCell>{tc.casoPrueba}</TableCell>
               <TableCell><div className="text-sm whitespace-pre-wrap w-full">{tc.descripcion}</div></TableCell>
               <TableCell><div className="text-sm whitespace-pre-wrap w-full">{tc.pasoAPaso}</div></TableCell>
-              <TableCell><Textarea value={tc.resultadoEsperado} onChange={e => onUpdate(tc.id, 'resultadoEsperado', e.target.value)} className="min-h-[60px]" /></TableCell>
-              <TableCell><Input value={tc.datosPrueba} onChange={e => onUpdate(tc.id, 'datosPrueba', e.target.value)} /></TableCell>
-              <TableCell><Textarea value={tc.comentarios} onChange={e => onUpdate(tc.id, 'comentarios', e.target.value)} className="min-h-[60px]" /></TableCell>
+              <TableCell>{tc.resultadoEsperado}</TableCell>
+              <TableCell>{tc.datosPrueba}</TableCell>
+              <TableCell><Textarea value={tc.comentarios} onChange={e => onUpdate(tc.id, 'comentarios', e.target.value)} className="min-h-[60px]" placeholder={tc.estado === 'Failed' ? 'Reason for failure required' : 'Comments'} /></TableCell>
               <TableCell>
-                <Input value={tc.evidencia} onChange={e => onUpdate(tc.id, 'evidencia', e.target.value)} placeholder="Image/video URL" />
+                <Input value={tc.evidencia} onChange={e => onUpdate(tc.id, 'evidencia', e.target.value)} placeholder={tc.estado === 'Failed' ? 'Evidence URL required' : 'Image/video URL'} />
                 {tc.evidencia && <img src={tc.evidencia} alt="Evidence preview" data-ai-hint="evidence screenshot" className="mt-2 rounded-md object-cover max-h-24" onError={(e) => (e.currentTarget.style.display = 'none')} />}
               </TableCell>
               <TableCell className="sticky right-0 bg-card">
@@ -293,16 +305,21 @@ const StatsDashboard: React.FC<{stats: {total: number, passed: number, failed: n
 const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCases }) => {
   const [report, setReport] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [reportDescription, setReportDescription] = useState('');
   const { toast } = useToast();
   const reportContentRef = useRef<HTMLDivElement>(null);
 
   const handleGenerate = async () => {
+    if (!reportDescription.trim()) {
+      toast({ title: "Summary Required", description: "Please provide a summary for the report.", variant: "destructive" });
+      return;
+    }
     setIsLoading(true);
     setReport(null);
-    const aiCases: AITestCase[] = failedCases.map(({ id, estado, ...rest }) => ({ ...rest, estado: 'Fallido' }));
+    const aiCases: AITestCase[] = failedCases.map(({ id, ...rest }) => ({ ...rest, estado: 'Fallido' }));
     
     try {
-      const result = await generateReportAction({ failedTestCases: aiCases });
+      const result = await generateReportAction({ failedTestCases: aiCases, reportDescription });
       setReport(result.report);
     } catch (error) {
       toast({ title: "Report Generation Failed", description: "An error occurred while contacting the AI.", variant: "destructive" });
@@ -312,7 +329,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
   };
 
   const handlePrint = () => {
-    const content = reportContentRef.current?.innerHTML;
+    const content = reportContentRef.current?.innerText;
     if (!content) return;
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
@@ -323,18 +340,15 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
       <html>
         <head>
           <title>TestWave Failure Report</title>
-          <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Source+Code+Pro&display=swap" rel="stylesheet">
           <style>
-            body { font-family: 'Inter', sans-serif; margin: 2rem; color: #333; }
+            body { font-family: 'Inter', sans-serif; margin: 2rem; color: #333; line-height: 1.6; }
             h1 { color: #A085CF; border-bottom: 2px solid #A085CF; padding-bottom: 0.5rem; }
-            h2 { font-size: 1.25rem; margin-top: 2rem; border-bottom: 1px solid #ccc; padding-bottom: 0.25rem; }
             pre { background-color: #f0f0f5; padding: 1rem; border-radius: 0.5rem; white-space: pre-wrap; word-wrap: break-word; font-family: 'Source Code Pro', monospace; }
-            img { max-width: 100%; height: auto; border-radius: 0.5rem; margin-top: 1rem; }
           </style>
         </head>
         <body>
           <h1>TestWave Failure Report</h1>
-          ${content.replace(/<pre>/g, '<div>').replace(/<\/pre>/g, '</div>')}
+          <pre>${content}</pre>
         </body>
       </html>
     `);
@@ -347,7 +361,12 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
   }
 
   return (
-    <Dialog onOpenChange={(open) => !open && setReport(null)}>
+    <Dialog onOpenChange={(open) => {
+      if (!open) {
+        setReport(null);
+        setReportDescription('');
+      }
+    }}>
       <DialogTrigger asChild>
         <Button variant="outline" disabled={!failedCases.length}><FileText /> Generate Failure Report ({failedCases.length})</Button>
       </DialogTrigger>
@@ -356,9 +375,19 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
           <DialogTitle>Failure Report</DialogTitle>
         </DialogHeader>
         {!report && !isLoading && (
-          <div className="text-center py-8">
-            <p>Generate a detailed report for all {failedCases.length} failed test cases using AI.</p>
-            <Button onClick={handleGenerate} className="mt-4">Generate Report</Button>
+           <div className="space-y-4 py-4">
+            <p>Generate a detailed report for the {failedCases.length} failed test case(s) using AI.</p>
+            <div>
+              <Label htmlFor="report-description" className="font-semibold">Report Summary</Label>
+              <Textarea
+                id="report-description"
+                placeholder="Provide an overall summary or context for this failure report. This is required."
+                value={reportDescription}
+                onChange={(e) => setReportDescription(e.target.value)}
+                className="mt-2 min-h-[100px]"
+              />
+            </div>
+            <Button onClick={handleGenerate} className="w-full">Generate Report</Button>
           </div>
         )}
         {isLoading && (
@@ -369,14 +398,14 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
         )}
         {report && (
           <>
-            <div ref={reportContentRef} className="prose prose-sm max-h-[60vh] overflow-y-auto p-4 bg-muted/50 rounded-md">
-              <pre className="whitespace-pre-wrap font-sans">{report}</pre>
+            <div className="max-h-[60vh] overflow-y-auto p-4 bg-muted/50 rounded-md">
+              <pre ref={reportContentRef} className="whitespace-pre-wrap font-sans text-sm">{report}</pre>
             </div>
             <DialogFooter>
               <DialogClose asChild>
                 <Button variant="secondary">Close</Button>
               </DialogClose>
-              <Button onClick={handlePrint}><Download /> Download as PDF</Button>
+              <Button onClick={handlePrint}><Download /> Print Report</Button>
             </DialogFooter>
           </>
         )}

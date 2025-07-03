@@ -41,7 +41,7 @@ const TestWaveDashboard: React.FC = () => {
 
   useEffect(() => {
     try {
-      const savedCases = localStorage.getItem('testwave-cases');
+      const savedCases = localStorage.getItem('testony-cases');
       if (savedCases) {
         setTestCases(JSON.parse(savedCases));
       }
@@ -53,7 +53,7 @@ const TestWaveDashboard: React.FC = () => {
 
   useEffect(() => {
     try {
-      localStorage.setItem('testwave-cases', JSON.stringify(testCases));
+      localStorage.setItem('testony-cases', JSON.stringify(testCases));
     } catch (error) {
       console.error("Failed to save to localStorage", error);
       toast({ title: "Error", description: "Could not save data to local storage.", variant: "destructive" });
@@ -134,7 +134,7 @@ const TestWaveDashboard: React.FC = () => {
 
   const handleClearData = () => {
     setTestCases([]);
-    localStorage.removeItem('testwave-cases');
+    localStorage.removeItem('testony-cases');
     toast({ title: "Datos eliminados", description: "Todos los casos de prueba han sido eliminados.", variant: "destructive" });
   };
 
@@ -153,7 +153,7 @@ const TestWaveDashboard: React.FC = () => {
           <div className="container flex h-16 items-center justify-between">
             <div className="flex gap-2 items-center">
               <Wind className="h-6 w-6 text-primary" />
-              <h1 className="text-2xl font-bold tracking-tight font-headline">TestWave</h1>
+              <h1 className="text-2xl font-bold tracking-tight font-headline">TESTONY</h1>
             </div>
             <div className="flex items-center justify-end space-x-2">
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".json" className="hidden" id="json-upload" />
@@ -167,7 +167,7 @@ const TestWaveDashboard: React.FC = () => {
         <main className="flex-1 container mx-auto p-4 md:p-6 lg:p-8">
           {!testCases.length ? (
               <div className="text-center py-20">
-                <h2 className="text-2xl font-semibold">Bienvenido a TestWave</h2>
+                <h2 className="text-2xl font-semibold">Bienvenido a TESTONY</h2>
                 <p className="text-muted-foreground mt-2">Carga un archivo JSON para empezar con tus casos de prueba.</p>
                 <Button onClick={() => fileInputRef.current?.click()} className="mt-6 bg-primary hover:bg-primary/90">
                   <Upload className="mr-2" /> Carga tu primer archivo

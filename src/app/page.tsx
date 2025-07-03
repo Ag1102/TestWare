@@ -10,7 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
-import { ChartContainer, ChartTooltip, ChartTooltipContent, Pie, PieChart } from '@/components/ui/chart';
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
+import { PieChart, Pie } from 'recharts';
 import { useToast } from "@/hooks/use-toast";
 import { generateReportAction } from '@/app/actions';
 import { Upload, Download, Trash2, FileText, Loader2, BarChart, List, Wind } from 'lucide-react';
@@ -384,3 +385,5 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
 };
 
 export default TestWaveDashboard;
+
+    

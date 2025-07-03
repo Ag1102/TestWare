@@ -234,8 +234,20 @@ const TestCaseTable: React.FC<{testCases: TestCase[], onUpdate: (id: string, fie
             <TableRow key={tc.id}>
               <TableCell>{tc.proceso}</TableCell>
               <TableCell>{tc.casoPrueba}</TableCell>
-              <TableCell><div className="text-sm whitespace-pre-wrap w-full">{tc.descripcion}</div></TableCell>
-              <TableCell><div className="text-sm whitespace-pre-wrap w-full">{tc.pasoAPaso}</div></TableCell>
+              <TableCell>
+                <Textarea 
+                  value={tc.descripcion} 
+                  readOnly 
+                  className="min-h-[60px] w-full resize-none border-none bg-transparent p-0 focus-visible:ring-0" 
+                />
+              </TableCell>
+              <TableCell>
+                <Textarea 
+                  value={tc.pasoAPaso} 
+                  readOnly 
+                  className="min-h-[60px] w-full resize-none border-none bg-transparent p-0 focus-visible:ring-0" 
+                />
+              </TableCell>
               <TableCell>{tc.resultadoEsperado}</TableCell>
               <TableCell>{tc.datosPrueba}</TableCell>
               <TableCell><Textarea value={tc.comentarios} onChange={e => onUpdate(tc.id, 'comentarios', e.target.value)} className="min-h-[60px]" placeholder={tc.estado === 'Failed' ? 'Reason for failure required' : 'Comments'} /></TableCell>

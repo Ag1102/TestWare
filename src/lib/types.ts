@@ -1,4 +1,4 @@
-export type TestCaseStatus = 'Passed' | 'Failed' | 'N/A' | '';
+export type TestCaseStatus = 'Passed' | 'Failed' | 'N/A' | 'pending';
 
 export interface TestCase {
   id: string;

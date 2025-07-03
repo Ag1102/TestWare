@@ -50,7 +50,7 @@ const TestWaveDashboard: React.FC = () => {
   const filteredCases = useMemo(() => {
     return testCases.filter(tc => 
       (filterProcess === 'all' || tc.proceso === filterProcess) &&
-      (filterStatus === 'all' || (filterStatus === 'pending' ? tc.estado === '' : tc.estado === filterStatus))
+      (filterStatus === 'all' || tc.estado === filterStatus)
     );
   }, [testCases, filterProcess, filterStatus]);
 
@@ -59,7 +59,7 @@ const TestWaveDashboard: React.FC = () => {
     const passed = testCases.filter(c => c.estado === 'Passed').length;
     const failed = testCases.filter(c => c.estado === 'Failed').length;
     const na = testCases.filter(c => c.estado === 'N/A').length;
-    const pending = total - passed - failed - na;
+    const pending = testCases.filter(c => c.estado === 'pending').length;
     return { total, passed, failed, na, pending };
   }, [testCases]);
 
@@ -74,7 +74,7 @@ const TestWaveDashboard: React.FC = () => {
         const newCases: TestCase[] = json.map((c: any) => ({
           ...c,
           id: crypto.randomUUID(),
-          estado: c.estado || '' // Use '' for pending status
+          estado: c.estado || 'pending'
         }));
         setTestCases(newCases);
         toast({ title: "Success", description: `${newCases.length} test cases loaded.` });
@@ -197,7 +197,7 @@ const TestWaveDashboard: React.FC = () => {
   );
 };
 
-const TestCaseTable: React.FC<{testCases: TestCase[], onUpdate: (id: string, field: keyof TestCase, value: string) => void}> = ({ testCases, onUpdate }) => {
+const TestCaseTable: React.FC<{testCases: TestCase[], onUpdate: (id: string, field: keyof TestCase, value: string | TestCaseStatus) => void}> = ({ testCases, onUpdate }) => {
   if (testCases.length === 0) {
     return <div className="text-center py-10 text-muted-foreground">No test cases match the current filters.</div>;
   }
@@ -222,8 +222,8 @@ const TestCaseTable: React.FC<{testCases: TestCase[], onUpdate: (id: string, fie
             <TableRow key={tc.id}>
               <TableCell><Input value={tc.proceso} onChange={e => onUpdate(tc.id, 'proceso', e.target.value)} /></TableCell>
               <TableCell><Input value={tc.casoPrueba} onChange={e => onUpdate(tc.id, 'casoPrueba', e.target.value)} /></TableCell>
-              <TableCell><Textarea value={tc.descripcion} onChange={e => onUpdate(tc.id, 'descripcion', e.target.value)} className="min-h-[60px]" /></TableCell>
-              <TableCell><Textarea value={tc.pasoAPaso} onChange={e => onUpdate(tc.id, 'pasoAPaso', e.target.value)} className="min-h-[60px]" /></TableCell>
+              <TableCell><div className="text-sm whitespace-pre-wrap w-full">{tc.descripcion}</div></TableCell>
+              <TableCell><div className="text-sm whitespace-pre-wrap w-full">{tc.pasoAPaso}</div></TableCell>
               <TableCell><Textarea value={tc.resultadoEsperado} onChange={e => onUpdate(tc.id, 'resultadoEsperado', e.target.value)} className="min-h-[60px]" /></TableCell>
               <TableCell><Input value={tc.datosPrueba} onChange={e => onUpdate(tc.id, 'datosPrueba', e.target.value)} /></TableCell>
               <TableCell><Textarea value={tc.comentarios} onChange={e => onUpdate(tc.id, 'comentarios', e.target.value)} className="min-h-[60px]" /></TableCell>
@@ -232,7 +232,7 @@ const TestCaseTable: React.FC<{testCases: TestCase[], onUpdate: (id: string, fie
                 {tc.evidencia && <img src={tc.evidencia} alt="Evidence preview" data-ai-hint="evidence screenshot" className="mt-2 rounded-md object-cover max-h-24" onError={(e) => (e.currentTarget.style.display = 'none')} />}
               </TableCell>
               <TableCell className="sticky right-0 bg-card">
-                <Select value={tc.estado} onValueChange={(value: TestCaseStatus) => onUpdate(tc.id, 'estado', value)}>
+                <Select value={tc.estado || 'pending'} onValueChange={(value: TestCaseStatus) => onUpdate(tc.id, 'estado', value)}>
                   <SelectTrigger>
                     <SelectValue placeholder="Set status" />
                   </SelectTrigger>
@@ -240,6 +240,7 @@ const TestCaseTable: React.FC<{testCases: TestCase[], onUpdate: (id: string, fie
                     <SelectItem value="Passed">Passed</SelectItem>
                     <SelectItem value="Failed">Failed</SelectItem>
                     <SelectItem value="N/A">N/A</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
                   </SelectContent>
                 </Select>
               </TableCell>

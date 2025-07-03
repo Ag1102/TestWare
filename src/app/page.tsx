@@ -45,12 +45,12 @@ const TestWaveDashboard: React.FC = () => {
     }
   }, [testCases, toast]);
 
-  const processes = useMemo(() => ['all', ...Array.from(new Set(testCases.map(tc => tc.proceso)))], [testCases]);
+  const processes = useMemo(() => ['all', ...Array.from(new Set(testCases.map(tc => tc.proceso))).filter(Boolean)], [testCases]);
 
   const filteredCases = useMemo(() => {
     return testCases.filter(tc => 
       (filterProcess === 'all' || tc.proceso === filterProcess) &&
-      (filterStatus === 'all' || tc.estado === filterStatus)
+      (filterStatus === 'all' || (filterStatus === 'pending' ? tc.estado === '' : tc.estado === filterStatus))
     );
   }, [testCases, filterProcess, filterStatus]);
 
@@ -74,7 +74,7 @@ const TestWaveDashboard: React.FC = () => {
         const newCases: TestCase[] = json.map((c: any) => ({
           ...c,
           id: crypto.randomUUID(),
-          estado: c.estado || 'N/A'
+          estado: c.estado || '' // Use '' for pending status
         }));
         setTestCases(newCases);
         toast({ title: "Success", description: `${newCases.length} test cases loaded.` });
@@ -174,7 +174,7 @@ const TestWaveDashboard: React.FC = () => {
                             <SelectItem value="Passed">Passed</SelectItem>
                             <SelectItem value="Failed">Failed</SelectItem>
                             <SelectItem value="N/A">N/A</SelectItem>
-                            <SelectItem value="">Pending</SelectItem>
+                            <SelectItem value="pending">Pending</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -385,5 +385,3 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
 };
 
 export default TestWaveDashboard;
-
-    

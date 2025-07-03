@@ -6,13 +6,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { useToast } from "@/hooks/use-toast";
 import { generateReportAction } from '@/app/actions';
-import { Upload, Download, Trash2, FileText, Loader2, Wind, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter } from 'lucide-react';
+import { Upload, Download, Trash2, FileText, Loader2, Bug, Search, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
@@ -32,7 +31,7 @@ const statusIcons: Record<TestCaseStatus, React.ReactNode> = {
   'pending': <Hourglass className="h-5 w-5 text-yellow-500" />,
 }
 
-const TestWaveDashboard: React.FC = () => {
+const TestwareDashboard: React.FC = () => {
   const [testCases, setTestCases] = useState<TestCase[]>([]);
   const [filterProcess, setFilterProcess] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -41,7 +40,7 @@ const TestWaveDashboard: React.FC = () => {
 
   useEffect(() => {
     try {
-      const savedCases = localStorage.getItem('testony-cases');
+      const savedCases = localStorage.getItem('testware-cases');
       if (savedCases) {
         setTestCases(JSON.parse(savedCases));
       }
@@ -53,7 +52,7 @@ const TestWaveDashboard: React.FC = () => {
 
   useEffect(() => {
     try {
-      localStorage.setItem('testony-cases', JSON.stringify(testCases));
+      localStorage.setItem('testware-cases', JSON.stringify(testCases));
     } catch (error) {
       console.error("Failed to save to localStorage", error);
       toast({ title: "Error", description: "Could not save data to local storage.", variant: "destructive" });
@@ -134,7 +133,7 @@ const TestWaveDashboard: React.FC = () => {
 
   const handleClearData = () => {
     setTestCases([]);
-    localStorage.removeItem('testony-cases');
+    localStorage.removeItem('testware-cases');
     toast({ title: "Datos eliminados", description: "Todos los casos de prueba han sido eliminados.", variant: "destructive" });
   };
 
@@ -152,8 +151,11 @@ const TestWaveDashboard: React.FC = () => {
         <header className="sticky top-0 z-10 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="container flex h-16 items-center justify-between">
             <div className="flex gap-2 items-center">
-              <Wind className="h-6 w-6 text-primary" />
-              <h1 className="text-2xl font-bold tracking-tight font-headline">TESTONY</h1>
+              <div className="flex items-center">
+                  <Bug className="h-6 w-6 text-primary" />
+                  <Search className="h-5 w-5 -ml-2 text-primary" />
+              </div>
+              <h1 className="text-2xl font-bold tracking-tight font-headline">TESTWARE</h1>
             </div>
             <div className="flex items-center justify-end space-x-2">
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".json" className="hidden" id="json-upload" />
@@ -167,7 +169,7 @@ const TestWaveDashboard: React.FC = () => {
         <main className="flex-1 container mx-auto p-4 md:p-6 lg:p-8">
           {!testCases.length ? (
               <div className="text-center py-20">
-                <h2 className="text-2xl font-semibold">Bienvenido a TESTONY</h2>
+                <h2 className="text-2xl font-semibold">Bienvenido a TESTWARE</h2>
                 <p className="text-muted-foreground mt-2">Carga un archivo JSON para empezar con tus casos de prueba.</p>
                 <Button onClick={() => fileInputRef.current?.click()} className="mt-6 bg-primary hover:bg-primary/90">
                   <Upload className="mr-2" /> Carga tu primer archivo
@@ -315,18 +317,26 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCas
         
         <div className="space-y-2">
           <Label>Estado</Label>
-          <RadioGroup
-            value={testCase.estado || 'pending'}
-            onValueChange={(value: TestCaseStatus) => onUpdate(testCase.id, 'estado', value)}
-            className="flex flex-wrap gap-2 pt-2"
+          <Select
+            value={testCase.estado === 'pending' ? undefined : testCase.estado}
+            onValueChange={(value) => onUpdate(testCase.id, 'estado', value as TestCaseStatus)}
           >
-            {Object.keys(statusMap).filter(s => s !== 'pending').map((status) => (
-              <div key={status} className="flex items-center">
-                <RadioGroupItem value={status} id={`${testCase.id}-${status}`} />
-                <Label htmlFor={`${testCase.id}-${status}`} className="ml-2 cursor-pointer">{statusMap[status]}</Label>
-              </div>
-            ))}
-          </RadioGroup>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Seleccionar estado..." />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.keys(statusMap)
+                .filter((s) => s !== 'pending')
+                .map((status) => (
+                  <SelectItem key={status} value={status}>
+                    <div className="flex items-center gap-2">
+                      {statusIcons[status as TestCaseStatus]}
+                      <span>{statusMap[status as TestCaseStatus]}</span>
+                    </div>
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
         </div>
         
         <div className="space-y-2">
@@ -576,4 +586,4 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
   );
 };
 
-export default TestWaveDashboard;
+export default TestwareDashboard;

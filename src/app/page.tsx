@@ -214,65 +214,61 @@ const TestCaseTable: React.FC<{testCases: TestCase[], onUpdate: (id: string, fie
     return <div className="text-center py-10 text-muted-foreground">No test cases match the current filters.</div>;
   }
   return (
-    <div className="w-full overflow-x-auto">
-      <Table className="min-w-max">
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-[150px]">Process</TableHead>
-            <TableHead className="w-[120px]">Case ID</TableHead>
-            <TableHead className="min-w-[250px]">Description</TableHead>
-            <TableHead className="min-w-[200px]">Steps</TableHead>
-            <TableHead className="min-w-[200px]">Expected Result</TableHead>
-            <TableHead className="min-w-[150px]">Test Data</TableHead>
-            <TableHead className="min-w-[250px]">Comments</TableHead>
-            <TableHead className="min-w-[200px]">Evidence</TableHead>
-            <TableHead className="w-[150px] sticky right-0 bg-card">Status</TableHead>
+    <Table className="min-w-[1920px]">
+      <TableHeader>
+        <TableRow>
+          <TableHead className="w-[150px]">Process</TableHead>
+          <TableHead className="w-[120px]">Case ID</TableHead>
+          <TableHead className="w-[300px]">Description</TableHead>
+          <TableHead className="w-[300px]">Steps</TableHead>
+          <TableHead className="w-[200px]">Expected Result</TableHead>
+          <TableHead className="w-[200px]">Test Data</TableHead>
+          <TableHead className="w-[250px]">Comments</TableHead>
+          <TableHead className="w-[250px]">Evidence</TableHead>
+          <TableHead className="w-[150px] sticky right-0 bg-card">Status</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {testCases.map((tc) => (
+          <TableRow key={tc.id}>
+            <TableCell className="align-top font-medium">{tc.proceso}</TableCell>
+            <TableCell className="align-top font-mono text-sm">{tc.casoPrueba}</TableCell>
+            <TableCell className="align-top">
+              <p className="whitespace-pre-wrap">{tc.descripcion}</p>
+            </TableCell>
+            <TableCell className="align-top">
+              <p className="whitespace-pre-wrap">{tc.pasoAPaso}</p>
+            </TableCell>
+            <TableCell className="align-top">{tc.resultadoEsperado}</TableCell>
+            <TableCell className="align-top">{tc.datosPrueba}</TableCell>
+            <TableCell className="align-top">
+              <Textarea value={tc.comentarios} onChange={e => onUpdate(tc.id, 'comentarios', e.target.value)} className="min-h-[80px]" placeholder={tc.estado === 'Failed' ? 'Reason for failure required' : 'Comments'} />
+            </TableCell>
+            <TableCell className="align-top">
+              <Input value={tc.evidencia} onChange={e => onUpdate(tc.id, 'evidencia', e.target.value)} placeholder={tc.estado === 'Failed' ? 'Evidence URL required' : 'Image/video URL'} />
+               {tc.evidencia && (
+                <a href={tc.evidencia} target="_blank" rel="noopener noreferrer" className="mt-2 block">
+                  <img src={tc.evidencia} alt="Evidence preview" data-ai-hint="evidence screenshot" className="rounded-md object-cover max-h-24 hover:opacity-80 transition-opacity" onError={(e) => (e.currentTarget.style.display = 'none')} />
+                </a>
+              )}
+            </TableCell>
+            <TableCell className="sticky right-0 bg-card align-middle">
+              <Select value={tc.estado || 'pending'} onValueChange={(value: TestCaseStatus) => onUpdate(tc.id, 'estado', value)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Set status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Passed">Passed</SelectItem>
+                  <SelectItem value="Failed">Failed</SelectItem>
+                  <SelectItem value="N/A">N/A</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                </SelectContent>
+              </Select>
+            </TableCell>
           </TableRow>
-        </TableHeader>
-        <TableBody>
-          {testCases.map((tc) => (
-            <TableRow key={tc.id}>
-              <TableCell>{tc.proceso}</TableCell>
-              <TableCell>{tc.casoPrueba}</TableCell>
-              <TableCell>
-                <Textarea 
-                  value={tc.descripcion} 
-                  readOnly 
-                  className="min-h-[60px] w-full resize-none border-none bg-transparent p-0 focus-visible:ring-0" 
-                />
-              </TableCell>
-              <TableCell>
-                <Textarea 
-                  value={tc.pasoAPaso} 
-                  readOnly 
-                  className="min-h-[60px] w-full resize-none border-none bg-transparent p-0 focus-visible:ring-0" 
-                />
-              </TableCell>
-              <TableCell>{tc.resultadoEsperado}</TableCell>
-              <TableCell>{tc.datosPrueba}</TableCell>
-              <TableCell><Textarea value={tc.comentarios} onChange={e => onUpdate(tc.id, 'comentarios', e.target.value)} className="min-h-[60px]" placeholder={tc.estado === 'Failed' ? 'Reason for failure required' : 'Comments'} /></TableCell>
-              <TableCell>
-                <Input value={tc.evidencia} onChange={e => onUpdate(tc.id, 'evidencia', e.target.value)} placeholder={tc.estado === 'Failed' ? 'Evidence URL required' : 'Image/video URL'} />
-                {tc.evidencia && <img src={tc.evidencia} alt="Evidence preview" data-ai-hint="evidence screenshot" className="mt-2 rounded-md object-cover max-h-24" onError={(e) => (e.currentTarget.style.display = 'none')} />}
-              </TableCell>
-              <TableCell className="sticky right-0 bg-card">
-                <Select value={tc.estado || 'pending'} onValueChange={(value: TestCaseStatus) => onUpdate(tc.id, 'estado', value)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Set status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Passed">Passed</SelectItem>
-                    <SelectItem value="Failed">Failed</SelectItem>
-                    <SelectItem value="N/A">N/A</SelectItem>
-                    <SelectItem value="pending">Pending</SelectItem>
-                  </SelectContent>
-                </Select>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+        ))}
+      </TableBody>
+    </Table>
   );
 };
 

@@ -7,21 +7,32 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
-import { PieChart, Pie } from 'recharts';
 import { useToast } from "@/hooks/use-toast";
 import { generateReportAction } from '@/app/actions';
-import { Upload, Download, Trash2, FileText, Loader2, BarChart, List, Wind } from 'lucide-react';
+import { Upload, Download, Trash2, FileText, Loader2, Wind, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter } from 'lucide-react';
+
+const statusMap: Record<TestCaseStatus, string> = {
+  'Passed': 'Aprobado',
+  'Failed': 'Fallido',
+  'N/A': 'N/A',
+  'pending': 'Pendiente',
+};
+
+const statusIcons: Record<TestCaseStatus, React.ReactNode> = {
+  'Passed': <CheckCircle2 className="h-5 w-5 text-green-500" />,
+  'Failed': <XCircle className="h-5 w-5 text-red-500" />,
+  'N/A': <FileQuestion className="h-5 w-5 text-gray-500" />,
+  'pending': <Hourglass className="h-5 w-5 text-yellow-500" />,
+}
 
 const TestWaveDashboard: React.FC = () => {
   const [testCases, setTestCases] = useState<TestCase[]>([]);
   const [filterProcess, setFilterProcess] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [view, setView] = useState<'table' | 'stats'>('table');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -61,7 +72,9 @@ const TestWaveDashboard: React.FC = () => {
     const failed = testCases.filter(c => c.estado === 'Failed').length;
     const na = testCases.filter(c => c.estado === 'N/A').length;
     const pending = testCases.filter(c => c.estado === 'pending').length;
-    return { total, passed, failed, na, pending };
+    const completed = passed + failed + na;
+    const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+    return { total, passed, failed, na, pending, completed, progress };
   }, [testCases]);
 
   const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
@@ -78,10 +91,10 @@ const TestWaveDashboard: React.FC = () => {
           estado: c.estado || 'pending'
         }));
         setTestCases(newCases);
-        toast({ title: "Success", description: `${newCases.length} test cases loaded.` });
+        toast({ title: "Éxito", description: `${newCases.length} casos de prueba cargados.` });
       } catch (error) {
         console.error("Failed to parse JSON", error);
-        toast({ title: "Upload Failed", description: "Please upload a valid JSON file.", variant: "destructive" });
+        toast({ title: "Fallo la Carga", description: "Por favor, carga un archivo JSON válido.", variant: "destructive" });
       }
     };
     reader.readAsText(file);
@@ -93,8 +106,8 @@ const TestWaveDashboard: React.FC = () => {
       const testCase = testCases.find(tc => tc.id === id);
       if (testCase && (!testCase.comentarios || !testCase.evidencia)) {
         toast({
-          title: "Information Required",
-          description: "Comments and Evidence are required before marking a test case as Failed.",
+          title: "Información Requerida",
+          description: "Comentarios y Evidencia son requeridos antes de marcar un caso de prueba como Fallido.",
           variant: "destructive",
         });
         return; // Prevent status update
@@ -102,213 +115,235 @@ const TestWaveDashboard: React.FC = () => {
     }
     setTestCases(prev => prev.map(tc => tc.id === id ? { ...tc, [field]: value } : tc));
   };
-
-  const handleExportJson = () => {
-    const dataStr = JSON.stringify(testCases, null, 2);
-    const blob = new Blob([dataStr], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `testwave_export_${new Date().toISOString().split('T')[0]}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-    toast({ title: "Exported!", description: "Test cases saved to JSON file." });
+  
+  const handleDeleteTestCase = (id: string) => {
+    setTestCases(prev => prev.filter(tc => tc.id !== id));
+    toast({ title: "Caso de prueba eliminado", variant: "destructive" });
   };
 
   const handleClearData = () => {
     setTestCases([]);
     localStorage.removeItem('testwave-cases');
-    toast({ title: "Data Cleared", description: "All test cases have been removed.", variant: "destructive" });
+    toast({ title: "Datos eliminados", description: "Todos los casos de prueba han sido eliminados.", variant: "destructive" });
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-background text-foreground font-body">
-      <header className="sticky top-0 z-40 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-16 items-center space-x-4 sm:justify-between sm:space-x-0">
-          <div className="flex gap-2 items-center">
-            <Wind className="h-6 w-6 text-primary" />
-            <h1 className="text-2xl font-bold tracking-tight font-headline">TestWave</h1>
+    <div className="flex min-h-screen bg-background text-foreground font-body">
+      <Sidebar 
+        stats={stats}
+        processes={processes}
+        filterProcess={filterProcess}
+        setFilterProcess={setFilterProcess}
+        filterStatus={filterStatus}
+        setFilterStatus={setFilterStatus}
+      />
+      <div className="flex-1 flex flex-col">
+        <header className="sticky top-0 z-10 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="container flex h-16 items-center justify-between">
+            <div className="flex gap-2 items-center">
+              <Wind className="h-6 w-6 text-primary" />
+              <h1 className="text-2xl font-bold tracking-tight font-headline">TestWave</h1>
+            </div>
+            <div className="flex items-center justify-end space-x-2">
+              <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".json" className="hidden" id="json-upload" />
+              <Button variant="outline" onClick={() => fileInputRef.current?.click()}><Upload /> Cargar JSON</Button>
+              <FailureReportDialog failedCases={testCases.filter(tc => tc.estado === 'Failed')} />
+              <Button variant="destructive" onClick={handleClearData} disabled={!testCases.length}><Trash2 /> Limpiar Todo</Button>
+            </div>
           </div>
-          <div className="flex flex-1 items-center justify-end space-x-2">
-            <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".json" className="hidden" id="json-upload" />
-            <Button onClick={() => fileInputRef.current?.click()}><Upload /> Upload JSON</Button>
-            <Button variant="secondary" onClick={handleExportJson} disabled={!testCases.length}><Download /> Export JSON</Button>
-            <FailureReportDialog failedCases={testCases.filter(tc => tc.estado === 'Failed')} />
-            <Button variant="destructive" onClick={handleClearData} disabled={!testCases.length}><Trash2 /> Clear All</Button>
+        </header>
+
+        <main className="flex-1 container mx-auto p-4 md:p-6 lg:p-8">
+          {!testCases.length ? (
+              <div className="text-center py-20">
+                <h2 className="text-2xl font-semibold">Bienvenido a TestWave</h2>
+                <p className="text-muted-foreground mt-2">Carga un archivo JSON para empezar con tus casos de prueba.</p>
+                <Button onClick={() => fileInputRef.current?.click()} className="mt-6 bg-primary hover:bg-primary/90">
+                  <Upload className="mr-2" /> Carga tu primer archivo
+                </Button>
+              </div>
+            ) : (
+            <div className="space-y-4">
+              {filteredCases.map((tc) => (
+                <TestCaseCard key={tc.id} testCase={tc} onUpdate={handleUpdate} onDelete={handleDeleteTestCase} />
+              ))}
+              {filteredCases.length === 0 && (
+                <div className="text-center py-10 text-muted-foreground">No hay casos de prueba que coincidan con los filtros actuales.</div>
+              )}
+            </div>
+          )}
+        </main>
+      </div>
+    </div>
+  );
+};
+
+const Sidebar = ({ stats, processes, filterProcess, setFilterProcess, filterStatus, setFilterStatus }) => (
+  <aside className="w-80 bg-card border-r p-6 space-y-8 sticky top-0 h-screen overflow-y-auto">
+    <div>
+        <h2 className="text-lg font-semibold tracking-tight">Panel de Control</h2>
+        <div className="mt-4 space-y-2">
+          <p className="text-sm text-muted-foreground">{stats.completed}/{stats.total} casos completados ({stats.progress}%)</p>
+          <div className="w-full bg-muted rounded-full h-2.5">
+            <div className="bg-primary h-2.5 rounded-full" style={{ width: `${stats.progress}%` }}></div>
           </div>
         </div>
-      </header>
-
-      <main className="flex-1 container mx-auto p-4 md:p-6 lg:p-8">
-        {!testCases.length ? (
-            <div className="text-center py-20">
-              <h2 className="text-2xl font-semibold">Welcome to TestWave</h2>
-              <p className="text-muted-foreground mt-2">Upload a JSON file to get started with your test cases.</p>
-              <Button onClick={() => fileInputRef.current?.click()} className="mt-6">
-                <Upload className="mr-2" /> Upload Your First File
-              </Button>
-            </div>
-          ) : (
-          <>
-            <div className="md:hidden mb-4">
-              <Select value={view} onValueChange={(v) => setView(v as 'table' | 'stats')}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Change view" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="table"><List className="inline-block mr-2 h-4 w-4"/> Test Cases</SelectItem>
-                  <SelectItem value="stats"><BarChart className="inline-block mr-2 h-4 w-4"/> Statistics</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
-              <div className={`md:col-span-2 lg:col-span-3 ${view === 'table' ? '' : 'hidden md:block'}`}>
-                <Card>
-                  <CardHeader>
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                      <CardTitle>Test Cases</CardTitle>
-                      <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                        <Select value={filterProcess} onValueChange={setFilterProcess}>
-                          <SelectTrigger className="w-full sm:w-[180px]">
-                            <SelectValue placeholder="Filter by process..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {processes.map(p => <SelectItem key={p} value={p}>{p === 'all' ? 'All Processes' : p}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                        <Select value={filterStatus} onValueChange={setFilterStatus}>
-                          <SelectTrigger className="w-full sm:w-[180px]">
-                            <SelectValue placeholder="Filter by status..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All Statuses</SelectItem>
-                            <SelectItem value="Passed">Passed</SelectItem>
-                            <SelectItem value="Failed">Failed</SelectItem>
-                            <SelectItem value="N/A">N/A</SelectItem>
-                            <SelectItem value="pending">Pending</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <TestCaseTable testCases={filteredCases} onUpdate={handleUpdate} />
-                  </CardContent>
-                </Card>
-              </div>
-
-              <div className={`md:col-span-1 lg:col-span-1 ${view === 'stats' ? '' : 'hidden md:block'}`}>
-                <StatsDashboard stats={stats} />
-              </div>
-            </div>
-          </>
-        )}
-      </main>
     </div>
-  );
-};
+    
+    <div>
+      <h3 className="text-md font-semibold flex items-center gap-2"><BarChart2 className="h-5 w-5"/> Estadísticas</h3>
+      <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+        <div className="p-2 bg-green-100 dark:bg-green-900/50 rounded-lg"><p className="text-xl font-bold text-green-600">{stats.passed}</p><p className="text-xs text-muted-foreground">Aprobados</p></div>
+        <div className="p-2 bg-red-100 dark:bg-red-900/50 rounded-lg"><p className="text-xl font-bold text-red-600">{stats.failed}</p><p className="text-xs text-muted-foreground">Fallidos</p></div>
+        <div className="p-2 bg-gray-100 dark:bg-gray-900/50 rounded-lg"><p className="text-xl font-bold text-gray-500">{stats.na}</p><p className="text-xs text-muted-foreground">N/A</p></div>
+      </div>
+       <div className="p-2 mt-2 bg-yellow-100 dark:bg-yellow-900/50 rounded-lg text-center"><p className="text-xl font-bold text-yellow-600">{stats.pending}</p><p className="text-xs text-muted-foreground">Pendientes</p></div>
+    </div>
+    
+    <div>
+      <h3 className="text-md font-semibold flex items-center gap-2"><Filter className="h-5 w-5"/> Filtros</h3>
+      <div className="mt-4 space-y-4">
+        <div>
+          <Label>Proceso</Label>
+          <Select value={filterProcess} onValueChange={setFilterProcess}>
+            <SelectTrigger className="w-full mt-2">
+              <SelectValue placeholder="Filtrar por proceso..." />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los Procesos</SelectItem>
+              {processes.slice(1).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label>Estado</Label>
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger className="w-full mt-2">
+              <SelectValue placeholder="Filtrar por estado..." />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los Estados</SelectItem>
+              {Object.keys(statusMap).map(status => (
+                <SelectItem key={status} value={status}>{statusMap[status]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+    </div>
+  </aside>
+);
 
-const TestCaseTable: React.FC<{testCases: TestCase[], onUpdate: (id: string, field: keyof TestCase, value: string | TestCaseStatus) => void}> = ({ testCases, onUpdate }) => {
-  if (testCases.length === 0) {
-    return <div className="text-center py-10 text-muted-foreground">No test cases match the current filters.</div>;
-  }
+const TestCaseCard = ({ testCase, onUpdate, onDelete }) => {
+  const evidenceInputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
+
+  const handleEvidenceSelect = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+        toast({ title: "Archivo inválido", description: "Por favor, selecciona un archivo de imagen.", variant: "destructive" });
+        return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) { // 5MB limit
+      toast({ title: "Archivo demasiado grande", description: "Por favor, carga una imagen de menos de 5MB.", variant: "destructive" });
+      return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      onUpdate(testCase.id, 'evidencia', dataUrl);
+    };
+    reader.onerror = () => {
+        toast({ title: "Error al leer el archivo", variant: "destructive" });
+    }
+    reader.readAsDataURL(file);
+  };
+
   return (
-    <Table className="w-full table-fixed">
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-[10%]">Process</TableHead>
-          <TableHead className="w-[10%]">Case ID</TableHead>
-          <TableHead className="w-[15%]">Description</TableHead>
-          <TableHead className="w-[15%]">Steps</TableHead>
-          <TableHead className="w-[10%]">Expected Result</TableHead>
-          <TableHead className="w-[10%]">Test Data</TableHead>
-          <TableHead className="w-[10%]">Comments</TableHead>
-          <TableHead className="w-[10%]">Evidence</TableHead>
-          <TableHead className="w-[10%]">Status</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {testCases.map((tc) => (
-          <TableRow key={tc.id}>
-            <TableCell className="align-top font-medium break-words">{tc.proceso}</TableCell>
-            <TableCell className="align-top font-mono text-sm break-words">{tc.casoPrueba}</TableCell>
-            <TableCell className="align-top break-words">
-              <p className="whitespace-pre-wrap">{tc.descripcion}</p>
-            </TableCell>
-            <TableCell className="align-top break-words">
-              <p className="whitespace-pre-wrap">{tc.pasoAPaso}</p>
-            </TableCell>
-            <TableCell className="align-top break-words">{tc.resultadoEsperado}</TableCell>
-            <TableCell className="align-top break-words">{tc.datosPrueba}</TableCell>
-            <TableCell className="align-top">
-              <Textarea value={tc.comentarios} onChange={e => onUpdate(tc.id, 'comentarios', e.target.value)} className="min-h-[80px]" placeholder={tc.estado === 'Failed' ? 'Reason for failure required' : 'Comments'} />
-            </TableCell>
-            <TableCell className="align-top">
-              <Input value={tc.evidencia} onChange={e => onUpdate(tc.id, 'evidencia', e.target.value)} placeholder={tc.estado === 'Failed' ? 'Evidence URL required' : 'Image/video URL'} />
-               {tc.evidencia && (
-                <a href={tc.evidencia} target="_blank" rel="noopener noreferrer" className="mt-2 block">
-                  <img src={tc.evidencia} alt="Evidence preview" data-ai-hint="evidence screenshot" className="w-full rounded-md object-cover max-h-24 hover:opacity-80 transition-opacity" onError={(e) => (e.currentTarget.style.display = 'none')} />
-                </a>
-              )}
-            </TableCell>
-            <TableCell className="align-middle">
-              <Select value={tc.estado || 'pending'} onValueChange={(value: TestCaseStatus) => onUpdate(tc.id, 'estado', value)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Set status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Passed">Passed</SelectItem>
-                  <SelectItem value="Failed">Failed</SelectItem>
-                  <SelectItem value="N/A">N/A</SelectItem>
-                  <SelectItem value="pending">Pending</SelectItem>
-                </SelectContent>
-              </Select>
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  );
-};
+    <Card className="overflow-hidden">
+      <CardHeader className="flex flex-row items-center justify-between bg-muted/50 p-4">
+        <CardTitle className="font-mono text-base">{testCase.casoPrueba}</CardTitle>
+        <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => onDelete(testCase.id)}>
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </CardHeader>
+      <CardContent className="p-6 grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
+        <div className="md:col-span-2 space-y-4">
+            <InfoField label="Proceso" value={testCase.proceso} />
+            <InfoField label="Descripción" value={testCase.descripcion} preWrap />
+            <InfoField label="Paso a Paso" value={testCase.pasoAPaso} preWrap />
+            <InfoField label="Datos de Prueba" value={testCase.datosPrueba} />
+            <InfoField label="Resultado Esperado" value={testCase.resultadoEsperado} />
+        </div>
+        
+        <div className="space-y-2">
+          <Label>Estado</Label>
+          <RadioGroup
+            value={testCase.estado || 'pending'}
+            onValueChange={(value: TestCaseStatus) => onUpdate(testCase.id, 'estado', value)}
+            className="flex flex-wrap gap-2 pt-2"
+          >
+            {Object.keys(statusMap).filter(s => s !== 'pending').map((status) => (
+              <div key={status} className="flex items-center">
+                <RadioGroupItem value={status} id={`${testCase.id}-${status}`} />
+                <Label htmlFor={`${testCase.id}-${status}`} className="ml-2 cursor-pointer">{statusMap[status]}</Label>
+              </div>
+            ))}
+          </RadioGroup>
+        </div>
+        
+        <div className="space-y-2">
+          <Label>Comentarios</Label>
+          <Textarea 
+            value={testCase.comentarios} 
+            onChange={e => onUpdate(testCase.id, 'comentarios', e.target.value)} 
+            className="min-h-[80px]" 
+            placeholder={testCase.estado === 'Failed' ? 'Razón del fallo requerida' : 'Comentarios adicionales...'}
+          />
+        </div>
 
-const StatsDashboard: React.FC<{stats: {total: number, passed: number, failed: number, na: number, pending: number}}> = ({ stats }) => {
-  const chartData = [
-    { name: 'Passed', value: stats.passed, fill: 'hsl(var(--chart-3))' },
-    { name: 'Failed', value: stats.failed, fill: 'hsl(var(--chart-2))' },
-    { name: 'N/A', value: stats.na, fill: 'hsl(var(--chart-5))' },
-    { name: 'Pending', value: stats.pending, fill: 'hsl(var(--muted))' },
-  ].filter(d => d.value > 0);
-
-  return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader><CardTitle>Statistics</CardTitle></CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-4 text-center">
-            <div className="p-4 bg-muted/50 rounded-lg"><p className="text-2xl font-bold">{stats.total}</p><p className="text-sm text-muted-foreground">Total</p></div>
-            <div className="p-4 bg-muted/50 rounded-lg"><p className="text-2xl font-bold text-green-600">{stats.passed}</p><p className="text-sm text-muted-foreground">Passed</p></div>
-            <div className="p-4 bg-muted/50 rounded-lg"><p className="text-2xl font-bold text-red-600">{stats.failed}</p><p className="text-sm text-muted-foreground">Failed</p></div>
-            <div className="p-4 bg-muted/50 rounded-lg"><p className="text-2xl font-bold text-gray-500">{stats.na + stats.pending}</p><p className="text-sm text-muted-foreground">Pending / N/A</p></div>
+        <div className="md:col-span-2 space-y-2">
+          <Label>Evidencia</Label>
+          <div className="flex items-center gap-2">
+            <Input 
+              value={testCase.evidencia} 
+              onChange={e => onUpdate(testCase.id, 'evidencia', e.target.value)} 
+              placeholder={testCase.estado === 'Failed' ? 'URL de evidencia requerida' : 'Pega la URL o carga una imagen'} 
+            />
+            <input
+              type="file"
+              ref={evidenceInputRef}
+              className="hidden"
+              accept="image/*"
+              onChange={handleEvidenceSelect}
+            />
+            <Button variant="outline" onClick={() => evidenceInputRef.current?.click()}>
+              <Upload className="h-4 w-4 mr-2"/>
+              Cargar
+            </Button>
           </div>
-        </CardContent>
-      </Card>
-      {chartData.length > 0 && (
-        <Card>
-          <CardHeader><CardTitle>Status Breakdown</CardTitle></CardHeader>
-          <CardContent>
-            <ChartContainer config={{}} className="mx-auto aspect-square h-[250px]">
-              <PieChart>
-                <ChartTooltip content={<ChartTooltipContent nameKey="name" hideLabel />} />
-                <Pie data={chartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label />
-              </PieChart>
-            </ChartContainer>
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  );
+          {testCase.evidencia && (
+            <a href={testCase.evidencia} target="_blank" rel="noopener noreferrer" className="mt-2 block">
+              <img src={testCase.evidencia} alt="Vista previa de la evidencia" data-ai-hint="evidence screenshot" className="w-full max-w-sm rounded-md object-cover max-h-48 hover:opacity-80 transition-opacity border" onError={(e) => (e.currentTarget.style.display = 'none')} />
+            </a>
+          )}
+        </div>
+
+      </CardContent>
+    </Card>
+  )
 };
+
+const InfoField = ({ label, value, preWrap = false }) => (
+  <div>
+    <p className="text-sm font-semibold text-muted-foreground">{label}</p>
+    <p className={`text-sm mt-1 ${preWrap ? 'whitespace-pre-wrap' : ''}`}>{value || '-'}</p>
+  </div>
+);
 
 const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCases }) => {
   const [report, setReport] = useState<string | null>(null);
@@ -319,7 +354,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
 
   const handleGenerate = async () => {
     if (!reportDescription.trim()) {
-      toast({ title: "Summary Required", description: "Please provide a summary for the report.", variant: "destructive" });
+      toast({ title: "Resumen Requerido", description: "Por favor, proporciona un resumen para el reporte.", variant: "destructive" });
       return;
     }
     setIsLoading(true);
@@ -330,7 +365,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
       const result = await generateReportAction({ failedTestCases: aiCases, reportDescription });
       setReport(result.report);
     } catch (error) {
-      toast({ title: "Report Generation Failed", description: "An error occurred while contacting the AI.", variant: "destructive" });
+      toast({ title: "Fallo la Generación del Reporte", description: "Ocurrió un error al contactar a la IA.", variant: "destructive" });
     } finally {
       setIsLoading(false);
     }
@@ -341,7 +376,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
     if (!content) return;
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
-      toast({ title: "Print Error", description: "Please allow pop-ups to print the report.", variant: "destructive"});
+      toast({ title: "Error de Impresión", description: "Por favor, permite pop-ups para imprimir el reporte.", variant: "destructive"});
       return;
     }
     printWindow.document.write(`
@@ -350,12 +385,12 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
           <title>TestWave Failure Report</title>
           <style>
             body { font-family: 'Inter', sans-serif; margin: 2rem; color: #333; line-height: 1.6; }
-            h1 { color: #A085CF; border-bottom: 2px solid #A085CF; padding-bottom: 0.5rem; }
+            h1 { color: #8A2BE2; border-bottom: 2px solid #8A2BE2; padding-bottom: 0.5rem; }
             pre { background-color: #f0f0f5; padding: 1rem; border-radius: 0.5rem; white-space: pre-wrap; word-wrap: break-word; font-family: 'Source Code Pro', monospace; }
           </style>
         </head>
         <body>
-          <h1>TestWave Failure Report</h1>
+          <h1>Reporte de Fallos de TestWave</h1>
           <pre>${content}</pre>
         </body>
       </html>
@@ -376,32 +411,32 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
       }
     }}>
       <DialogTrigger asChild>
-        <Button variant="outline" disabled={!failedCases.length}><FileText /> Generate Failure Report ({failedCases.length})</Button>
+        <Button variant="destructive" disabled={!failedCases.length}><FileText /> Informe de Fallos ({failedCases.length})</Button>
       </DialogTrigger>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Failure Report</DialogTitle>
+          <DialogTitle>Informe de Fallos</DialogTitle>
         </DialogHeader>
         {!report && !isLoading && (
            <div className="space-y-4 py-4">
-            <p>Generate a detailed report for the {failedCases.length} failed test case(s) using AI.</p>
+            <p>Genera un reporte detallado para los {failedCases.length} caso(s) de prueba fallidos usando IA.</p>
             <div>
-              <Label htmlFor="report-description" className="font-semibold">Report Summary</Label>
+              <Label htmlFor="report-description" className="font-semibold">Resumen del Reporte</Label>
               <Textarea
                 id="report-description"
-                placeholder="Provide an overall summary or context for this failure report. This is required."
+                placeholder="Proporciona un resumen general o contexto para este informe de fallos. Esto es requerido."
                 value={reportDescription}
                 onChange={(e) => setReportDescription(e.target.value)}
                 className="mt-2 min-h-[100px]"
               />
             </div>
-            <Button onClick={handleGenerate} className="w-full">Generate Report</Button>
+            <Button onClick={handleGenerate} className="w-full bg-primary hover:bg-primary/90">Generar Reporte</Button>
           </div>
         )}
         {isLoading && (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-8 w-8 animate-spin" />
-            <p className="ml-4">Generating your report...</p>
+            <p className="ml-4">Generando tu reporte...</p>
           </div>
         )}
         {report && (
@@ -411,9 +446,9 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
             </div>
             <DialogFooter>
               <DialogClose asChild>
-                <Button variant="secondary">Close</Button>
+                <Button variant="secondary">Cerrar</Button>
               </DialogClose>
-              <Button onClick={handlePrint}><Download /> Print Report</Button>
+              <Button onClick={handlePrint}><Download /> Imprimir Reporte</Button>
             </DialogFooter>
           </>
         )}

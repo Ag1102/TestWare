@@ -1,8 +1,7 @@
-// src/ai/flows/generate-failure-report.ts
 'use server';
 
 /**
- * @fileOverview Generates a failure report from a list of failed test cases.
+ * @fileOverview Generates a failure report impact analysis from a list of failed test cases.
  *
  * - generateFailureReport - A function that generates the failure report.
  * - FailureReportInput - The input type for the generateFailureReport function.
@@ -31,7 +30,7 @@ const FailureReportInputSchema = z.object({
 export type FailureReportInput = z.infer<typeof FailureReportInputSchema>;
 
 const FailureReportOutputSchema = z.object({
-  report: z.string().describe('The generated failure report in plain text.'),
+  impactAnalysis: z.string().describe("A general impact analysis of how these combined failures might affect other parts of the system or the overall user experience."),
 });
 export type FailureReportOutput = z.infer<typeof FailureReportOutputSchema>;
 
@@ -43,44 +42,25 @@ const failureReportPrompt = ai.definePrompt({
   name: 'failureReportPrompt',
   input: {schema: FailureReportInputSchema},
   output: {schema: FailureReportOutputSchema},
-  prompt: `You are a QA report generator. Your task is to create a comprehensive failure report based on the provided data. The report should be in clean plain text, using indentation and clear headings.
+  prompt: `You are a QA expert. Based on the following failed test cases and a summary description, provide a concise but thorough impact analysis.
+Explain how these combined failures might impact other parts of the system, the business, or the overall user experience.
+The analysis should be in Spanish.
 
-First, present this overall summary at the top of the report:
-REPORT SUMMARY
+REPORT SUMMARY:
 ---
 {{reportDescription}}
 ---
 
-Next, detail each of the failed test cases.
-
+FAILED TEST CASES:
 {{#each failedTestCases}}
-========================================
-TEST CASE FAILED: {{this.casoPrueba}} - {{this.proceso}}
-========================================
-
-Description:
-{{this.descripcion}}
-
-Steps to Reproduce:
-{{this.pasoAPaso}}
-
-Test Data Used:
-{{this.datosPrueba}}
-
-Expected Result:
-{{this.resultadoEsperado}}
-
-QA Comments (Reason for Failure):
-{{this.comentarios}}
-
-Evidence Link:
-{{this.evidencia}}
-
+---
+- Test Case: {{this.casoPrueba}}
+- Process: {{this.proceso}}
+- Reason for Failure: {{this.comentarios}}
+---
 {{/each}}
-========================================
-GENERAL IMPACT ANALYSIS
-========================================
-After detailing all test cases, please provide a final analysis of how these combined failures might impact other parts of the system or the overall user experience.
+
+Based on this, generate only the "GENERAL IMPACT ANALYSIS" section.
 `,
 });
 

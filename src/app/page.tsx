@@ -1,8 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef, type ChangeEvent } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, memo, type ChangeEvent } from 'react';
 import { AITestCase, TestCase, TestCaseStatus } from '@/lib/types';
-import type { FailureReportInput } from '@/ai/flows/generate-failure-report';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -14,6 +13,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { useToast } from "@/hooks/use-toast";
 import { generateReportAction } from '@/app/actions';
 import { Upload, Download, Trash2, FileText, Loader2, Wind, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter } from 'lucide-react';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
 
 const statusMap: Record<TestCaseStatus, string> = {
   'Passed': 'Aprobado',
@@ -100,26 +103,34 @@ const TestWaveDashboard: React.FC = () => {
     reader.readAsText(file);
     if(fileInputRef.current) fileInputRef.current.value = "";
   };
-
-  const handleUpdate = (id: string, field: keyof TestCase, value: string | TestCaseStatus) => {
-    if (field === 'estado' && value === 'Failed') {
-      const testCase = testCases.find(tc => tc.id === id);
-      if (testCase && (!testCase.comentarios || !testCase.evidencia)) {
-        toast({
-          title: "Información Requerida",
-          description: "Comentarios y Evidencia son requeridos antes de marcar un caso de prueba como Fallido.",
-          variant: "destructive",
-        });
-        return; // Prevent status update
-      }
-    }
-    setTestCases(prev => prev.map(tc => tc.id === id ? { ...tc, [field]: value } : tc));
-  };
   
-  const handleDeleteTestCase = (id: string) => {
+  const handleUpdate = useCallback((id: string, field: keyof TestCase, value: string | TestCaseStatus) => {
+    setTestCases(prev => {
+      const newTestCases = [...prev];
+      const tcIndex = newTestCases.findIndex(tc => tc.id === id);
+      if (tcIndex === -1) return prev;
+
+      const testCase = newTestCases[tcIndex];
+
+      if (field === 'estado' && value === 'Failed') {
+        if (!testCase.comentarios || !testCase.evidencia) {
+          toast({
+            title: "Información Requerida",
+            description: "Comentarios y Evidencia son requeridos antes de marcar un caso de prueba como Fallido.",
+            variant: "destructive",
+          });
+          return prev;
+        }
+      }
+      newTestCases[tcIndex] = { ...testCase, [field]: value };
+      return newTestCases;
+    });
+  }, [toast]);
+  
+  const handleDeleteTestCase = useCallback((id: string) => {
     setTestCases(prev => prev.filter(tc => tc.id !== id));
     toast({ title: "Caso de prueba eliminado", variant: "destructive" });
-  };
+  }, []);
 
   const handleClearData = () => {
     setTestCases([]);
@@ -234,9 +245,31 @@ const Sidebar = ({ stats, processes, filterProcess, setFilterProcess, filterStat
   </aside>
 );
 
-const TestCaseCard = ({ testCase, onUpdate, onDelete }) => {
+const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCase, onUpdate: Function, onDelete: Function }) => {
   const evidenceInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  
+  const [comments, setComments] = useState(testCase.comentarios);
+
+  // Debounce comments update to improve performance
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      if (comments !== testCase.comentarios) {
+        onUpdate(testCase.id, 'comentarios', comments);
+      }
+    }, 500);
+
+    return () => clearTimeout(handler);
+  }, [comments, testCase.comentarios, testCase.id, onUpdate]);
+  
+  // Sync local state if prop changes from external source
+  useEffect(() => {
+    if (testCase.comentarios !== comments) {
+      setComments(testCase.comentarios);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [testCase.comentarios]);
+
 
   const handleEvidenceSelect = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -299,8 +332,8 @@ const TestCaseCard = ({ testCase, onUpdate, onDelete }) => {
         <div className="space-y-2">
           <Label>Comentarios</Label>
           <Textarea 
-            value={testCase.comentarios} 
-            onChange={e => onUpdate(testCase.id, 'comentarios', e.target.value)} 
+            value={comments} 
+            onChange={e => setComments(e.target.value)} 
             className="min-h-[80px]" 
             placeholder={testCase.estado === 'Failed' ? 'Razón del fallo requerida' : 'Comentarios adicionales...'}
           />
@@ -336,34 +369,39 @@ const TestCaseCard = ({ testCase, onUpdate, onDelete }) => {
       </CardContent>
     </Card>
   )
-};
+});
+TestCaseCard.displayName = "TestCaseCard";
 
 const InfoField = ({ label, value, preWrap = false }) => (
   <div>
     <p className="text-sm font-semibold text-muted-foreground">{label}</p>
-    <p className={`text-sm mt-1 ${preWrap ? 'whitespace-pre-wrap' : ''}`}>{value || '-'}</p>
+    <p className={`text-sm mt-1 ${preWrap ? 'whitespace-pre-wrap font-code' : ''}`}>{value || '-'}</p>
   </div>
 );
 
 const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCases }) => {
-  const [report, setReport] = useState<string | null>(null);
+  const [impactAnalysis, setImpactAnalysis] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [reportDescription, setReportDescription] = useState('');
+  const [authorName, setAuthorName] = useState('');
   const { toast } = useToast();
-  const reportContentRef = useRef<HTMLDivElement>(null);
 
   const handleGenerate = async () => {
     if (!reportDescription.trim()) {
       toast({ title: "Resumen Requerido", description: "Por favor, proporciona un resumen para el reporte.", variant: "destructive" });
       return;
     }
+     if (!authorName.trim()) {
+      toast({ title: "Autor Requerido", description: "Por favor, ingresa el nombre del autor.", variant: "destructive" });
+      return;
+    }
     setIsLoading(true);
-    setReport(null);
+    setImpactAnalysis(null);
     const aiCases: AITestCase[] = failedCases.map(({ id, ...rest }) => ({ ...rest, estado: 'Fallido' }));
     
     try {
       const result = await generateReportAction({ failedTestCases: aiCases, reportDescription });
-      setReport(result.report);
+      setImpactAnalysis(result.impactAnalysis);
     } catch (error) {
       toast({ title: "Fallo la Generación del Reporte", description: "Ocurrió un error al contactar a la IA.", variant: "destructive" });
     } finally {
@@ -371,55 +409,137 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
     }
   };
 
-  const handlePrint = () => {
-    const content = reportContentRef.current?.innerText;
-    if (!content) return;
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      toast({ title: "Error de Impresión", description: "Por favor, permite pop-ups para imprimir el reporte.", variant: "destructive"});
-      return;
+  const handleDownloadPdf = async () => {
+    const reportElement = document.createElement('div');
+    reportElement.style.position = 'absolute';
+    reportElement.style.left = '-9999px';
+    reportElement.style.top = '0';
+
+    const currentDate = new Date();
+    const formattedDate = format(currentDate, 'dd / MM / yyyy');
+    const evaluatedPeriod = format(currentDate, 'MMMM yyyy', { locale: es });
+    const capitalizedPeriod = evaluatedPeriod.charAt(0).toUpperCase() + evaluatedPeriod.slice(1);
+
+    const uniqueProcesses = [...new Set(failedCases.map(tc => tc.proceso))];
+
+    const escapeHtml = (unsafe: string) =>
+      unsafe
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;")
+         .replace(/"/g, "&quot;")
+         .replace(/'/g, "&#039;");
+
+    let innerHTML = `
+      <div style="font-family: Arial, sans-serif; color: #333; padding: 40px; width: 800px; background-color: white;">
+        <h1 style="font-size: 24px; border-bottom: 2px solid #ccc; padding-bottom: 8px; margin-bottom: 20px;">Informe de Hallazgos de QA</h1>
+        <p><strong>Elaborado por:</strong> ${escapeHtml(authorName)}</p>
+        <p><strong>Fecha:</strong> ${formattedDate}</p>
+        <p><strong>Período Evaluado:</strong> ${capitalizedPeriod}</p>
+        
+        <h2 style="font-size: 20px; margin-top: 30px; border-bottom: 1px solid #eee; padding-bottom: 5px;">Procesos Evaluados:</h2>
+        <ul style="padding-left: 20px;">${uniqueProcesses.map(p => `<li>${escapeHtml(p)}</li>`).join('')}</ul>
+
+        <h2 style="font-size: 20px; margin-top: 30px; border-bottom: 1px solid #eee; padding-bottom: 5px;">Resumen del Reporte</h2>
+        <p>${escapeHtml(reportDescription)}</p>
+
+        <h2 style="font-size: 20px; margin-top: 30px; border-bottom: 1px solid #eee; padding-bottom: 5px;">Detalle de Casos de Prueba Fallidos</h2>
+        ${failedCases.map(tc => `
+          <div style="page-break-inside: avoid; border-top: 1px solid #eee; margin-top: 20px; padding-top: 20px;">
+            <h3 style="font-size: 16px; font-weight: bold;">CASO: ${escapeHtml(tc.casoPrueba)} - ${escapeHtml(tc.proceso)}</h3>
+            <p><strong>Descripción:</strong> ${escapeHtml(tc.descripcion)}</p>
+            <p><strong>Paso a Paso:</strong></p>
+            <pre style="white-space: pre-wrap; font-family: 'Courier New', Courier, monospace; background: #f5f5f5; padding: 10px; border-radius: 5px; word-wrap: break-word;">${escapeHtml(tc.pasoAPaso)}</pre>
+            <p><strong>Datos de Prueba:</strong> ${escapeHtml(tc.datosPrueba)}</p>
+            <p><strong>Resultado Esperado:</strong> ${escapeHtml(tc.resultadoEsperado)}</p>
+            <p><strong>Comentarios de QA:</strong> ${escapeHtml(tc.comentarios)}</p>
+            <p><strong>Evidencia:</strong></p>
+            ${
+              tc.evidencia.startsWith('data:image')
+              ? `<img src="${tc.evidencia}" style="max-width: 100%; border: 1px solid #ddd; border-radius: 5px;" alt="Evidencia"/>`
+              : `<a href="${tc.evidencia}" target="_blank">${escapeHtml(tc.evidencia)}</a>`
+            }
+          </div>
+        `).join('')}
+
+        <h2 style="font-size: 20px; margin-top: 30px; border-bottom: 1px solid #eee; padding-bottom: 5px;">Análisis de Impacto General</h2>
+        <pre style="white-space: pre-wrap; font-family: 'Courier New', Courier, monospace; background: #f5f5f5; padding: 10px; border-radius: 5px; word-wrap: break-word;">${escapeHtml(impactAnalysis || '')}</pre>
+      </div>
+    `;
+    reportElement.innerHTML = innerHTML;
+    document.body.appendChild(reportElement);
+
+    try {
+      const canvas = await html2canvas(reportElement, { scale: 2, useCORS: true });
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      
+      const imgWidth = canvas.width;
+      const imgHeight = canvas.height;
+      const ratio = imgWidth / pdfWidth;
+      const scaledHeight = imgHeight / ratio;
+
+      let heightLeft = scaledHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, scaledHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft > 0) {
+        position = -heightLeft;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, scaledHeight);
+        heightLeft -= pageHeight;
+      }
+      
+      pdf.save(`reporte-fallos-${format(new Date(), 'yyyy-MM-dd')}.pdf`);
+    } catch (error) {
+        console.error("Error generating PDF:", error);
+        toast({ title: "Error de PDF", description: "No se pudo generar el archivo PDF.", variant: "destructive" });
+    } finally {
+        document.body.removeChild(reportElement);
     }
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>TestWave Failure Report</title>
-          <style>
-            body { font-family: 'Inter', sans-serif; margin: 2rem; color: #333; line-height: 1.6; }
-            h1 { color: #8A2BE2; border-bottom: 2px solid #8A2BE2; padding-bottom: 0.5rem; }
-            pre { background-color: #f0f0f5; padding: 1rem; border-radius: 0.5rem; white-space: pre-wrap; word-wrap: break-word; font-family: 'Source Code Pro', monospace; }
-          </style>
-        </head>
-        <body>
-          <h1>Reporte de Fallos de TestWave</h1>
-          <pre>${content}</pre>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => {
-        printWindow.print();
-        printWindow.close();
-    }, 250);
+  }
+
+  const resetDialog = () => {
+    setImpactAnalysis(null);
+    setReportDescription('');
+    setAuthorName('');
+    setIsLoading(false);
   }
 
   return (
-    <Dialog onOpenChange={(open) => {
-      if (!open) {
-        setReport(null);
-        setReportDescription('');
-      }
-    }}>
+    <Dialog onOpenChange={(open) => !open && resetDialog()}>
       <DialogTrigger asChild>
         <Button variant="destructive" disabled={!failedCases.length}><FileText /> Informe de Fallos ({failedCases.length})</Button>
       </DialogTrigger>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Informe de Fallos</DialogTitle>
+          <DialogTitle>Generar Informe de Fallos en PDF</DialogTitle>
         </DialogHeader>
-        {!report && !isLoading && (
+        
+        {isLoading && (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-8 w-8 animate-spin" />
+            <p className="ml-4">Generando análisis de impacto...</p>
+          </div>
+        )}
+
+        {!isLoading && !impactAnalysis && (
            <div className="space-y-4 py-4">
-            <p>Genera un reporte detallado para los {failedCases.length} caso(s) de prueba fallidos usando IA.</p>
+            <p>Genera un reporte detallado para los {failedCases.length} caso(s) de prueba fallidos. Primero, la IA generará un análisis de impacto.</p>
+            <div>
+              <Label htmlFor="author-name" className="font-semibold">Elaborado por</Label>
+              <Input
+                id="author-name"
+                placeholder="Ingresa tu nombre completo"
+                value={authorName}
+                onChange={(e) => setAuthorName(e.target.value)}
+                className="mt-2"
+              />
+            </div>
             <div>
               <Label htmlFor="report-description" className="font-semibold">Resumen del Reporte</Label>
               <Textarea
@@ -430,25 +550,24 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
                 className="mt-2 min-h-[100px]"
               />
             </div>
-            <Button onClick={handleGenerate} className="w-full bg-primary hover:bg-primary/90">Generar Reporte</Button>
+            <Button onClick={handleGenerate} className="w-full bg-primary hover:bg-primary/90">Generar Análisis de IA</Button>
           </div>
         )}
-        {isLoading && (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-8 w-8 animate-spin" />
-            <p className="ml-4">Generando tu reporte...</p>
-          </div>
-        )}
-        {report && (
+        
+        {!isLoading && impactAnalysis && (
           <>
-            <div className="max-h-[60vh] overflow-y-auto p-4 bg-muted/50 rounded-md">
-              <pre ref={reportContentRef} className="whitespace-pre-wrap font-sans text-sm">{report}</pre>
+            <div className="space-y-4 py-2">
+                <h3 className="font-semibold">Análisis de Impacto Generado por IA:</h3>
+                 <div className="max-h-[30vh] overflow-y-auto p-4 bg-muted/50 rounded-md">
+                    <pre className="whitespace-pre-wrap font-sans text-sm">{impactAnalysis}</pre>
+                </div>
+                <p className="text-sm text-muted-foreground">El análisis ha sido generado. Ahora puedes descargar el informe completo en formato PDF.</p>
             </div>
             <DialogFooter>
               <DialogClose asChild>
                 <Button variant="secondary">Cerrar</Button>
               </DialogClose>
-              <Button onClick={handlePrint}><Download /> Imprimir Reporte</Button>
+              <Button onClick={handleDownloadPdf}><Download /> Descargar PDF</Button>
             </DialogFooter>
           </>
         )}

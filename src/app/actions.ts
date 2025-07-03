@@ -4,7 +4,7 @@ import { generateFailureReport, FailureReportInput, FailureReportOutput } from '
 
 export async function generateReportAction(input: FailureReportInput): Promise<FailureReportOutput> {
   if (!input.failedTestCases || input.failedTestCases.length === 0) {
-    return { report: 'No failed test cases were provided to generate a report.' };
+    return { impactAnalysis: 'No failed test cases were provided to generate an impact analysis.' };
   }
   
   try {

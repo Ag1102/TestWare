@@ -214,33 +214,33 @@ const TestCaseTable: React.FC<{testCases: TestCase[], onUpdate: (id: string, fie
     return <div className="text-center py-10 text-muted-foreground">No test cases match the current filters.</div>;
   }
   return (
-    <Table className="min-w-[1920px]">
+    <Table className="w-full table-fixed">
       <TableHeader>
         <TableRow>
-          <TableHead className="w-[150px]">Process</TableHead>
-          <TableHead className="w-[120px]">Case ID</TableHead>
-          <TableHead className="w-[300px]">Description</TableHead>
-          <TableHead className="w-[300px]">Steps</TableHead>
-          <TableHead className="w-[200px]">Expected Result</TableHead>
-          <TableHead className="w-[200px]">Test Data</TableHead>
-          <TableHead className="w-[250px]">Comments</TableHead>
-          <TableHead className="w-[250px]">Evidence</TableHead>
-          <TableHead className="w-[150px] sticky right-0 bg-card">Status</TableHead>
+          <TableHead className="w-[10%]">Process</TableHead>
+          <TableHead className="w-[10%]">Case ID</TableHead>
+          <TableHead className="w-[15%]">Description</TableHead>
+          <TableHead className="w-[15%]">Steps</TableHead>
+          <TableHead className="w-[10%]">Expected Result</TableHead>
+          <TableHead className="w-[10%]">Test Data</TableHead>
+          <TableHead className="w-[10%]">Comments</TableHead>
+          <TableHead className="w-[10%]">Evidence</TableHead>
+          <TableHead className="w-[10%]">Status</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {testCases.map((tc) => (
           <TableRow key={tc.id}>
-            <TableCell className="align-top font-medium">{tc.proceso}</TableCell>
-            <TableCell className="align-top font-mono text-sm">{tc.casoPrueba}</TableCell>
-            <TableCell className="align-top">
+            <TableCell className="align-top font-medium break-words">{tc.proceso}</TableCell>
+            <TableCell className="align-top font-mono text-sm break-words">{tc.casoPrueba}</TableCell>
+            <TableCell className="align-top break-words">
               <p className="whitespace-pre-wrap">{tc.descripcion}</p>
             </TableCell>
-            <TableCell className="align-top">
+            <TableCell className="align-top break-words">
               <p className="whitespace-pre-wrap">{tc.pasoAPaso}</p>
             </TableCell>
-            <TableCell className="align-top">{tc.resultadoEsperado}</TableCell>
-            <TableCell className="align-top">{tc.datosPrueba}</TableCell>
+            <TableCell className="align-top break-words">{tc.resultadoEsperado}</TableCell>
+            <TableCell className="align-top break-words">{tc.datosPrueba}</TableCell>
             <TableCell className="align-top">
               <Textarea value={tc.comentarios} onChange={e => onUpdate(tc.id, 'comentarios', e.target.value)} className="min-h-[80px]" placeholder={tc.estado === 'Failed' ? 'Reason for failure required' : 'Comments'} />
             </TableCell>
@@ -248,11 +248,11 @@ const TestCaseTable: React.FC<{testCases: TestCase[], onUpdate: (id: string, fie
               <Input value={tc.evidencia} onChange={e => onUpdate(tc.id, 'evidencia', e.target.value)} placeholder={tc.estado === 'Failed' ? 'Evidence URL required' : 'Image/video URL'} />
                {tc.evidencia && (
                 <a href={tc.evidencia} target="_blank" rel="noopener noreferrer" className="mt-2 block">
-                  <img src={tc.evidencia} alt="Evidence preview" data-ai-hint="evidence screenshot" className="rounded-md object-cover max-h-24 hover:opacity-80 transition-opacity" onError={(e) => (e.currentTarget.style.display = 'none')} />
+                  <img src={tc.evidencia} alt="Evidence preview" data-ai-hint="evidence screenshot" className="w-full rounded-md object-cover max-h-24 hover:opacity-80 transition-opacity" onError={(e) => (e.currentTarget.style.display = 'none')} />
                 </a>
               )}
             </TableCell>
-            <TableCell className="sticky right-0 bg-card align-middle">
+            <TableCell className="align-middle">
               <Select value={tc.estado || 'pending'} onValueChange={(value: TestCaseStatus) => onUpdate(tc.id, 'estado', value)}>
                 <SelectTrigger>
                   <SelectValue placeholder="Set status" />

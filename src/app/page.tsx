@@ -16,6 +16,7 @@ import {
   ChartTooltipContent,
 } from "@/components/ui/chart"
 import type { ChartConfig } from "@/components/ui/chart";
+import { cn } from "@/lib/utils";
 
 import { AITestCase, TestCase, TestCaseStatus } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -27,7 +28,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { useToast } from "@/hooks/use-toast";
 import { generateReportAction } from '@/app/actions';
-import { Upload, Download, Trash2, FileText, Loader2, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter, PieChart as PieChartIcon } from 'lucide-react';
+import { Upload, Download, Trash2, FileText, Loader2, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter, PieChart as PieChartIcon, Search, Bug } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
@@ -48,25 +49,10 @@ const statusIcons: Record<TestCaseStatus, React.ReactNode> = {
 }
 
 const TestwareLogo = ({ className }: { className?: string }) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.5"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-  >
-    <circle cx="10.5" cy="10.5" r="7.5" />
-    <line x1="16" y1="16" x2="21" y2="21" />
-    <path d="M10.5 13a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" />
-    <line x1="10.5" y1="11.5" x2="10.5" y2="8" />
-    <line x1="8.5" y1="14" l1="8" y1="14.5" x2="7" y2="14" />
-    <line x1="12.5" y1="14" l1="13" y1="14.5" x2="14" y2="14" />
-    <line x1="8" y1="9" x2="7" y2="8.5" />
-    <line x1="13" y1="9" x2="14" y2="8.5" />
-  </svg>
+    <div className={cn("flex items-center justify-center", className)}>
+      <Bug className="h-5 w-5 -rotate-12 translate-x-1" />
+      <Search className="h-6 w-6 -translate-x-1" />
+    </div>
 );
 
 
@@ -143,27 +129,29 @@ const TestwareDashboard: React.FC = () => {
   };
   
   const handleUpdate = useCallback((id: string, field: keyof TestCase, value: string | TestCaseStatus) => {
+    const testCase = testCases.find(tc => tc.id === id);
+    if (!testCase) return;
+
+    if (field === 'estado' && value === 'Failed') {
+      if (!testCase.comentarios || testCase.comentarios.trim() === '' || !testCase.evidencia || testCase.evidencia.trim() === '') {
+        toast({
+          title: "Información Requerida",
+          description: "Comentarios y Evidencia son requeridos antes de marcar un caso de prueba como Fallido.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     setTestCases(prev => {
       const newTestCases = [...prev];
       const tcIndex = newTestCases.findIndex(tc => tc.id === id);
-      if (tcIndex === -1) return prev;
-
-      const testCase = newTestCases[tcIndex];
-
-      if (field === 'estado' && value === 'Failed') {
-        if (!testCase.comentarios || !testCase.evidencia) {
-          toast({
-            title: "Información Requerida",
-            description: "Comentarios y Evidencia son requeridos antes de marcar un caso de prueba como Fallido.",
-            variant: "destructive",
-          });
-          return prev;
-        }
-      }
-      newTestCases[tcIndex] = { ...testCase, [field]: value };
+      if (tcIndex === -1) return prev; 
+      
+      newTestCases[tcIndex] = { ...newTestCases[tcIndex], [field]: value };
       return newTestCases;
     });
-  }, [toast]);
+  }, [testCases, toast]);
   
   const handleDeleteTestCase = useCallback((id: string) => {
     setTestCases(prev => prev.filter(tc => tc.id !== id));
@@ -447,7 +435,7 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCas
         <div className="space-y-2">
           <Label>Estado</Label>
           <Select
-            value={testCase.estado === 'pending' ? undefined : testCase.estado}
+            value={testCase.estado}
             onValueChange={(value) => onUpdate(testCase.id, 'estado', value as TestCaseStatus)}
           >
             <SelectTrigger className="w-full">
@@ -455,7 +443,6 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCas
             </SelectTrigger>
             <SelectContent>
               {Object.keys(statusMap)
-                .filter((s) => s !== 'pending')
                 .map((status) => (
                   <SelectItem key={status} value={status}>
                     <div className="flex items-center gap-2">

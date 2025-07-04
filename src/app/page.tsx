@@ -16,7 +16,6 @@ import {
   ChartTooltipContent,
 } from "@/components/ui/chart"
 import type { ChartConfig } from "@/components/ui/chart";
-import { cn } from "@/lib/utils";
 
 import { AITestCase, TestCase, TestCaseStatus } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -33,6 +32,8 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { cn } from "@/lib/utils";
+
 
 const statusMap: Record<TestCaseStatus, string> = {
   'Passed': 'Aprobado',
@@ -87,35 +88,50 @@ const simpleUUID = () => {
 
 
 const TestwareDashboard: React.FC = () => {
-  const [testCases, setTestCases] = useState<TestCase[]>(() => {
-    if (typeof window === 'undefined') {
-      return [];
-    }
-    try {
-      const savedCases = window.localStorage.getItem('testcases');
-      const parsedCases = savedCases ? JSON.parse(savedCases) : [];
-      // Ensure all cases have an ID
-      return parsedCases.map((tc: any) => ({ ...tc, id: tc.id || simpleUUID() }));
-    } catch (error) {
-      console.error("Error reading from localStorage", error);
-      return [];
-    }
-  });
-
+  const [testCases, setTestCases] = useState<TestCase[]>([]);
+  const [isLoadingCases, setIsLoadingCases] = useState(true);
   const [filterProcess, setFilterProcess] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
-  useEffect(() => {
+  const syncWithServer = useCallback(async (updatedCases: TestCase[]) => {
     try {
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem('testcases', JSON.stringify(testCases));
-      }
+      await fetch('/api/test-cases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedCases),
+      });
     } catch (error) {
-      console.error("Error writing to localStorage", error);
+      console.error("Failed to sync with server:", error);
+      toast({
+        title: "Error de Sincronización",
+        description: "No se pudieron guardar los cambios en el servidor.",
+        variant: "destructive"
+      });
     }
-  }, [testCases]);
+  }, [toast]);
+
+  useEffect(() => {
+    const fetchTestCases = async () => {
+      try {
+        setIsLoadingCases(true);
+        const response = await fetch('/api/test-cases');
+        const data = await response.json();
+        setTestCases(data);
+      } catch (error) {
+        console.error("Failed to fetch test cases:", error);
+        toast({
+          title: "Error de Carga",
+          description: "No se pudieron cargar los casos de prueba del servidor.",
+          variant: "destructive"
+        });
+      } finally {
+        setIsLoadingCases(false);
+      }
+    };
+    fetchTestCases();
+  }, [toast]);
 
   const processes = useMemo(() => ['all', ...Array.from(new Set(testCases.map(tc => tc.proceso))).filter(Boolean)], [testCases]);
 
@@ -151,7 +167,9 @@ const TestwareDashboard: React.FC = () => {
             estado: c.estado || 'pending'
         }));
         
-        setTestCases(prev => [...prev, ...newCases]);
+        const updatedCases = [...testCases, ...newCases];
+        setTestCases(updatedCases);
+        syncWithServer(updatedCases);
         toast({ title: "Éxito", description: `${json.length} casos de prueba cargados.` });
       } catch (error) {
         console.error("Failed to parse or upload JSON", error);
@@ -174,25 +192,26 @@ const TestwareDashboard: React.FC = () => {
           description: "Comentarios y Evidencia son requeridos para marcar como Fallido.",
           variant: "destructive",
         });
-        // We do not return here, we let the state update so the user can see the change in the dropdown
-        // but the toast serves as a warning.
       }
     }
     
-    setTestCases(prevCases => 
-      prevCases.map(tc => 
-        tc.id === id ? { ...tc, [field]: value } : tc
-      )
+    const updatedCases = testCases.map(tc => 
+      tc.id === id ? { ...tc, [field]: value } : tc
     );
-  }, [testCases, toast]);
+    setTestCases(updatedCases);
+    syncWithServer(updatedCases);
+  }, [testCases, toast, syncWithServer]);
   
   const handleDeleteTestCase = useCallback((id: string) => {
-    setTestCases(prev => prev.filter(tc => tc.id !== id));
+    const updatedCases = testCases.filter(tc => tc.id !== id);
+    setTestCases(updatedCases);
+    syncWithServer(updatedCases);
     toast({ title: "Caso de prueba eliminado", variant: "destructive" });
-  }, [toast]);
+  }, [testCases, toast, syncWithServer]);
 
   const handleClearData = () => {
     setTestCases([]);
+    syncWithServer([]);
     toast({ title: "Datos eliminados", description: "Todos los casos de prueba han sido eliminados.", variant: "destructive" });
   };
 
@@ -223,7 +242,12 @@ const TestwareDashboard: React.FC = () => {
         </header>
 
         <main className="flex-1 container mx-auto p-4 md:p-6 lg:p-8">
-          {!testCases.length ? (
+          {isLoadingCases ? (
+             <div className="flex justify-center items-center py-20">
+                <Loader2 className="h-8 w-8 animate-spin" />
+                <p className="ml-4">Cargando casos de prueba...</p>
+             </div>
+          ) : !testCases.length ? (
               <div className="text-center py-20">
                 <h2 className="text-2xl font-semibold">Bienvenido a TESTWARE</h2>
                 <p className="text-muted-foreground mt-2">Carga un archivo JSON para empezar con tus casos de prueba.</p>
@@ -619,16 +643,17 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         addTextBox(`Elaborado por: ${authorName}`, { fontSize: 12 });
         addTextBox(`Fecha: ${formattedDate}`, { fontSize: 12 });
         addTextBox(`Período Evaluado: ${capitalizedPeriod}`, { fontSize: 12 });
-        
         y += 10;
         addTextBox('Procesos Evaluados', { fontSize: 14, fontStyle: 'bold' });
         addTextBox(uniqueProcesses.join(', '), { fontSize: 12 });
-        y += 10;
         
-        addTextBox('Resumen del Reporte', { fontSize: 14, fontStyle: 'bold' });
+        // --- PAGE 2: REPORT SUMMARY ---
+        addPageWithHeader();
+        addTextBox('Resumen del Reporte', { isTitle: true, fontSize: 18 });
+        y += 5;
         addTextBox(reportDescription, { fontSize: 11 });
 
-        // --- PAGE 2: IMPACT ANALYSIS ---
+        // --- PAGE 3: IMPACT ANALYSIS ---
         if (impactAnalysis) {
             addPageWithHeader();
             addTextBox('Análisis de Impacto General (Generado por IA)', { isTitle: true, fontSize: 18 });
@@ -715,8 +740,8 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         
         if (pieChartEl && barChartEl) {
           const addChart = async (element: HTMLElement, options: { width: number; x: number; y: number; }) => {
-              const canvas = await html2canvas(element, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
-              const imgData = canvas.toDataURL('image/png');
+              const canvas = await html2canvas(element, { scale: 3, backgroundColor: '#ffffff', useCORS: true });
+              const imgData = canvas.toDataURL('image/png', 0.95);
               const imgWidth = options.width;
               const imgHeight = (canvas.height * imgWidth) / canvas.width;
               
@@ -729,7 +754,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
           };
           
           const chartWidth = contentWidth / 2 - 5;
-          const pieHeight = await addChart(pieChartEl, { width: chartWidth, x: margin, y: y });
+          await addChart(pieChartEl, { width: chartWidth, x: margin, y: y });
           await addChart(barChartEl, { width: chartWidth, x: margin + chartWidth + 10, y: y });
         }
 

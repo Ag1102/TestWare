@@ -144,29 +144,31 @@ const TestwareDashboard: React.FC = () => {
   };
   
   const handleUpdate = useCallback((id: string, field: keyof TestCase, value: string | TestCaseStatus) => {
+    const tcIndex = testCases.findIndex(tc => tc.id === id);
+    if (tcIndex === -1) return;
+
+    const testCaseToUpdate = { ...testCases[tcIndex] };
+
+    // Perform validation outside of setState
+    if (field === 'estado' && value === 'Failed') {
+      if (!testCaseToUpdate.comentarios?.trim() || !testCaseToUpdate.evidencia?.trim()) {
+        toast({
+          title: "Información Requerida",
+          description: "Comentarios y Evidencia son requeridos para marcar como Fallido.",
+          variant: "destructive",
+        });
+        // Do not update the state, just show the toast
+        return; 
+      }
+    }
+    
+    // If validation passes, update the state
     setTestCases(prev => {
         const newTestCases = [...prev];
-        const tcIndex = newTestCases.findIndex(tc => tc.id === id);
-        if (tcIndex === -1) return prev;
-        
-        const testCaseToUpdate = { ...newTestCases[tcIndex], [field]: value };
-        
-        if (field === 'estado' && value === 'Failed') {
-            if (!testCaseToUpdate.comentarios?.trim() || !testCaseToUpdate.evidencia?.trim()) {
-                toast({
-                    title: "Información Requerida",
-                    description: "Comentarios y Evidencia son requeridos para marcar como Fallido.",
-                    variant: "destructive",
-                });
-                // Do not update the state, return the previous state
-                return prev;
-            }
-        }
-        
-        newTestCases[tcIndex] = testCaseToUpdate;
+        newTestCases[tcIndex] = { ...newTestCases[tcIndex], [field]: value };
         return newTestCases;
     });
-}, [toast]);
+}, [testCases, toast]);
   
   const handleDeleteTestCase = useCallback((id: string) => {
     setTestCases(prev => prev.filter(tc => tc.id !== id));
@@ -623,7 +625,9 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         </div>`;
       
       reportContainer.innerHTML = coverHtml;
-      const coverCanvas = await html2canvas(reportContainer.firstChild as HTMLElement, { scale: 2, useCORS: true });
+      const coverElement = reportContainer.firstElementChild as HTMLElement;
+      if (!coverElement) throw new Error("Failed to create cover page element for PDF.");
+      const coverCanvas = await html2canvas(coverElement, { scale: 2, useCORS: true });
       pdf.addImage(coverCanvas.toDataURL('image/png'), 'PNG', 0, 0, pdfWidth, pdfHeight);
   
       // --- 2. CONTENT PAGES ---
@@ -635,7 +639,11 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
   
         const addElementToPdf = async (elementHtml: string) => {
           reportContainer.innerHTML = elementHtml;
-          const element = reportContainer.firstChild as HTMLElement;
+          const element = reportContainer.firstElementChild as HTMLElement;
+          if (!element) {
+            console.warn("Skipping empty element in PDF generation.");
+            return;
+          }
           const canvas = await html2canvas(element, { scale: 2, useCORS: true });
           
           const contentWidth = pdfWidth - (margin * 2);
@@ -776,3 +784,5 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
 };
 
 export default TestwareDashboard;
+
+    

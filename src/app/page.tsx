@@ -1,8 +1,6 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useRef, useCallback, memo, type ChangeEvent } from 'react';
-import { db } from '@/lib/firebase';
-import { collection, query, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch, getDocs } from 'firebase/firestore';
 import {
   Bar,
   BarChart,
@@ -59,23 +57,23 @@ const TestwareLogo = ({ className }: { className?: string }) => (
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={cn("h-6 w-6 text-primary", className)}
+      className={cn("h-8 w-8 text-primary", className)}
     >
-      <path d="m21.54 11.54-1.3-1.3a1.5 1.5 0 0 0-2.12 0l-1.31 1.31" />
-      <path d="M12.31 7.41a5.03 5.03 0 0 1 2.28-2.28" />
-      <path d="M15.83 1.83l1.59 1.59a2 2 0 0 1 0 2.82l-1.42 1.42" />
-      <path d="M11 10.5a1.5 1.5 0 0 1-2.12 0L7.57 9.17" />
-      <path d="M6.17 10.57a5.03 5.03 0 0 1-2.28 2.28" />
-      <path d="M4.76 16.59l-1.59-1.59a2 2 0 0 1 0-2.82l1.42-1.42" />
-      <path d="m21 21-1.41-1.41" />
-      <path d="M3.17 3.17a2.5 2.5 0 0 1-.5-3.46l.5-.5" />
-      <path d="M14.5 17.5a2.5 2.5 0 0 1 3.46-.5l.5.5" />
-      <path d="m15 15-3.375-3.375" />
-      <path d="m9.17 7.57-1.31-1.31a1.5 1.5 0 0 0-2.12 0L4.44 7.56" />
-      <path d="M18.73 16.83a5.04 5.04 0 0 1-2.28 2.28" />
-      <path d="M16.83 4.76l-1.59-1.59a2 2 0 0 0-2.82 0l-1.42 1.42" />
+      <path d="M12 8V2" />
+      <path d="M4.93 4.93 3.51 3.51" />
+      <path d="M2 12H8" />
+      <path d="M4.93 19.07l-1.42 1.42" />
+      <path d="M12 22v-6" />
+      <path d="M19.07 19.07l-1.42-1.42" />
+      <path d="M22 12h-6" />
+      <path d="M19.07 4.93l-1.42 1.42" />
+      <circle cx="12" cy="12" r="4" />
+      <path d="M10 12c-2 2-2 5-2 5" />
+      <path d="M14 12c2 2 2 5 2 5" />
+      <path d="M9 7h6" />
     </svg>
 );
+
 
 // A simple polyfill for crypto.randomUUID() for broader browser compatibility
 const simpleUUID = () => {
@@ -89,32 +87,35 @@ const simpleUUID = () => {
 
 
 const TestwareDashboard: React.FC = () => {
-  const [testCases, setTestCases] = useState<TestCase[]>([]);
+  const [testCases, setTestCases] = useState<TestCase[]>(() => {
+    if (typeof window === 'undefined') {
+      return [];
+    }
+    try {
+      const savedCases = window.localStorage.getItem('testcases');
+      const parsedCases = savedCases ? JSON.parse(savedCases) : [];
+      // Ensure all cases have an ID
+      return parsedCases.map((tc: any) => ({ ...tc, id: tc.id || simpleUUID() }));
+    } catch (error) {
+      console.error("Error reading from localStorage", error);
+      return [];
+    }
+  });
+
   const [filterProcess, setFilterProcess] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   useEffect(() => {
-    if (!db) return;
-    const q = query(collection(db, "testcases"));
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const casesFromDb: TestCase[] = [];
-      querySnapshot.forEach((doc) => {
-        // The document ID is not part of doc.data(), so we add it manually
-        casesFromDb.push({ ...doc.data(), id: doc.id } as TestCase);
-      });
-       // Sort cases by case ID to maintain a consistent order
-      casesFromDb.sort((a, b) => (a.casoPrueba || "").localeCompare(b.casoPrueba || ""));
-      setTestCases(casesFromDb);
-    }, (error) => {
-      console.error("Error listening to Firestore:", error);
-      toast({ title: "Error de Conexión", description: "No se pudo conectar a la base de datos.", variant: "destructive" });
-    });
-
-    // Cleanup subscription on component unmount
-    return () => unsubscribe();
-  }, [toast]);
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('testcases', JSON.stringify(testCases));
+      }
+    } catch (error) {
+      console.error("Error writing to localStorage", error);
+    }
+  }, [testCases]);
 
   const processes = useMemo(() => ['all', ...Array.from(new Set(testCases.map(tc => tc.proceso))).filter(Boolean)], [testCases]);
 
@@ -141,24 +142,16 @@ const TestwareDashboard: React.FC = () => {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = async (event) => {
+    reader.onload = (event) => {
       try {
         const json = JSON.parse(event.target?.result as string);
-        const batch = writeBatch(db);
+        const newCases = json.map((c: any) => ({
+            ...c,
+            id: simpleUUID(),
+            estado: c.estado || 'pending'
+        }));
         
-        json.forEach((c: any) => {
-            const newId = simpleUUID();
-            const newCaseData = {
-              ...c,
-              estado: c.estado || 'pending'
-            };
-            // Do not add the id to the document data
-            delete newCaseData.id; 
-            const docRef = doc(db, 'testcases', newId);
-            batch.set(docRef, newCaseData);
-        });
-
-        await batch.commit();
+        setTestCases(prev => [...prev, ...newCases]);
         toast({ title: "Éxito", description: `${json.length} casos de prueba cargados.` });
       } catch (error) {
         console.error("Failed to parse or upload JSON", error);
@@ -169,13 +162,11 @@ const TestwareDashboard: React.FC = () => {
     if(fileInputRef.current) fileInputRef.current.value = "";
   };
   
-  const handleUpdate = useCallback(async (id: string, field: keyof TestCase, value: string | TestCaseStatus) => {
+  const handleUpdate = useCallback((id: string, field: keyof TestCase, value: string | TestCaseStatus) => {
     const testCaseToUpdate = testCases.find(tc => tc.id === id);
     if (!testCaseToUpdate) return;
   
-    // Perform validation before updating the state
     if (field === 'estado' && value === 'Failed') {
-      // Create a temporary updated object for validation
       const updatedTestCase = { ...testCaseToUpdate, [field]: value };
       if (!updatedTestCase.comentarios?.trim() || !updatedTestCase.evidencia?.trim()) {
         toast({
@@ -183,43 +174,26 @@ const TestwareDashboard: React.FC = () => {
           description: "Comentarios y Evidencia son requeridos para marcar como Fallido.",
           variant: "destructive",
         });
-        return; // Stop the update
+        // We do not return here, we let the state update so the user can see the change in the dropdown
+        // but the toast serves as a warning.
       }
     }
     
-    try {
-      const docRef = doc(db, 'testcases', id);
-      await updateDoc(docRef, { [field]: value });
-    } catch (error) {
-      console.error("Error updating document:", error);
-      toast({ title: "Error", description: "No se pudo actualizar el caso de prueba.", variant: "destructive" });
-    }
+    setTestCases(prevCases => 
+      prevCases.map(tc => 
+        tc.id === id ? { ...tc, [field]: value } : tc
+      )
+    );
   }, [testCases, toast]);
   
-  const handleDeleteTestCase = useCallback(async (id: string) => {
-    try {
-      await deleteDoc(doc(db, "testcases", id));
-      toast({ title: "Caso de prueba eliminado", variant: "destructive" });
-    } catch(error) {
-       console.error("Error deleting document:", error);
-       toast({ title: "Error", description: "No se pudo eliminar el caso de prueba.", variant: "destructive" });
-    }
+  const handleDeleteTestCase = useCallback((id: string) => {
+    setTestCases(prev => prev.filter(tc => tc.id !== id));
+    toast({ title: "Caso de prueba eliminado", variant: "destructive" });
   }, [toast]);
 
-  const handleClearData = async () => {
-    try {
-      const testCasesCollection = collection(db, 'testcases');
-      const testCasesSnapshot = await getDocs(testCasesCollection);
-      const batch = writeBatch(db);
-      testCasesSnapshot.forEach(doc => {
-          batch.delete(doc.ref);
-      });
-      await batch.commit();
-      toast({ title: "Datos eliminados", description: "Todos los casos de prueba han sido eliminados.", variant: "destructive" });
-    } catch(error) {
-       console.error("Error clearing data:", error);
-       toast({ title: "Error", description: "No se pudieron eliminar los datos.", variant: "destructive" });
-    }
+  const handleClearData = () => {
+    setTestCases([]);
+    toast({ title: "Datos eliminados", description: "Todos los casos de prueba han sido eliminados.", variant: "destructive" });
   };
 
   return (
@@ -589,53 +563,57 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         const pdfWidth = pdf.internal.pageSize.getWidth();
         const margin = 15;
         const contentWidth = pdfWidth - (margin * 2);
-        let y = margin;
+        let y = 0; // y position starts at 0
         let pageNumber = 1;
 
-        const addHeaderAndFooter = (pageNum: number) => {
-            if (pageNum > 1) {
-                pdf.setPage(pageNum);
-            }
+        const addHeaderAndFooter = () => {
             pdf.setFontSize(10);
             pdf.setTextColor(100);
             pdf.text('Informe de Hallazgos de QA', margin, margin - 5);
             pdf.setLineWidth(0.5);
             pdf.line(margin, margin, pdfWidth - margin, margin);
+
+            // Footer
             pdf.setTextColor(150);
-            pdf.text(`Página ${pageNum}`, pdfWidth - margin, pdf.internal.pageSize.getHeight() - margin + 10, { align: 'right' });
+            pdf.text(`Página ${pageNumber}`, pdfWidth - margin, pdf.internal.pageSize.getHeight() - margin + 10, { align: 'right' });
             y = margin + 5;
         };
         
-        const addTextBox = (text: string, options: any = {}) => {
-          const { isTitle = false, isSubtitle = false, isCode = false, color = [0, 0, 0], fontSize = 10, fontStyle = 'normal' } = options;
-      
-          pdf.setFont('helvetica', fontStyle);
-          if (isCode) pdf.setFont('courier', 'normal');
-          pdf.setFontSize(fontSize);
-          pdf.setTextColor(color[0], color[1], color[2]);
-      
-          const lines = pdf.splitTextToSize(text || '-', contentWidth - (isSubtitle ? 4 : 0));
-          const textHeight = lines.length * (fontSize / 2.5) + (lines.length > 1 ? (lines.length - 1) * 2 : 0); // Approximate height with line spacing
-
-          if (y + textHeight > pdf.internal.pageSize.getHeight() - margin) {
-              pdf.addPage();
-              pageNumber++;
-              addHeaderAndFooter(pageNumber);
-          }
-      
-          pdf.text(lines, margin + (isSubtitle ? 2 : 0), y);
-          y += textHeight + 4; // Add padding
+        const addPageWithHeader = () => {
+            pdf.addPage();
+            pageNumber++;
+            addHeaderAndFooter();
         };
 
-        // --- COVER PAGE ---
+        const addTextBox = (text: string, options: any = {}) => {
+            const { isTitle = false, isSubtitle = false, isCode = false, color = [0, 0, 0], fontSize = 10, fontStyle = 'normal' } = options;
+        
+            pdf.setFont('helvetica', fontStyle);
+            if (isCode) pdf.setFont('courier', 'normal');
+            pdf.setFontSize(fontSize);
+            pdf.setTextColor(color[0], color[1], color[2]);
+        
+            const lines = pdf.splitTextToSize(text || '-', contentWidth - (isSubtitle ? 4 : 0));
+            // Approximate height with line spacing
+            const textHeight = (pdf.getLineHeight(text) / pdf.internal.scaleFactor) * lines.length;
+            
+            if (y + textHeight > pdf.internal.pageSize.getHeight() - margin - 10) { // Check with footer margin
+                addPageWithHeader();
+            }
+        
+            pdf.text(lines, margin + (isSubtitle ? 2 : 0), y);
+            y += textHeight + 2; // Add padding
+        };
+        
+        // --- PAGE 1: COVER ---
         const currentDate = new Date();
         const formattedDate = format(currentDate, 'dd / MM / yyyy');
         const evaluatedPeriod = format(currentDate, 'MMMM yyyy', { locale: es });
         const capitalizedPeriod = evaluatedPeriod.charAt(0).toUpperCase() + evaluatedPeriod.slice(1);
         const uniqueProcesses = [...new Set(allCases.map(tc => tc.proceso).filter(Boolean))];
-
-        pdf.setFontSize(32).setFont('helvetica', 'bold').setTextColor('#5D54A4').text('Informe de Hallazgos de QA', pdfWidth / 2, 60, { align: 'center' });
-        pdf.setFontSize(16).setFont('helvetica', 'normal').setTextColor('#777').text('TESTWARE', pdfWidth / 2, 70, { align: 'center' });
+        
+        pdf.setFontSize(32).setFont('helvetica', 'bold').setTextColor(93, 84, 164).text('Informe de Hallazgos de QA', pdfWidth / 2, 60, { align: 'center' });
+        pdf.setFontSize(16).setFont('helvetica', 'normal').setTextColor(119, 119, 119).text('TESTWARE', pdfWidth / 2, 70, { align: 'center' });
         
         y = 110;
         addTextBox(`Elaborado por: ${authorName}`, { fontSize: 12 });
@@ -645,77 +623,54 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         y += 10;
         addTextBox('Procesos Evaluados', { fontSize: 14, fontStyle: 'bold' });
         addTextBox(uniqueProcesses.join(', '), { fontSize: 12 });
+        y += 10;
         
-        // --- REPORT SUMMARY ---
-        if (reportDescription) {
-            pdf.addPage();
-            pageNumber++;
-            addHeaderAndFooter(pageNumber);
-            addTextBox('Resumen del Reporte', { isTitle: true, fontSize: 18 });
-            y += 5;
-            pdf.setFillColor(249, 249, 249);
-            const summaryLines = pdf.splitTextToSize(reportDescription, contentWidth);
-            const summaryHeight = summaryLines.length * 5 + 10;
-            pdf.roundedRect(margin - 2, y - 4, contentWidth + 4, summaryHeight, 3, 3, 'F');
-            addTextBox(reportDescription, { fontSize: 11 });
-        }
-        
-        // --- IMPACT ANALYSIS ---
+        addTextBox('Resumen del Reporte', { fontSize: 14, fontStyle: 'bold' });
+        addTextBox(reportDescription, { fontSize: 11 });
+
+        // --- PAGE 2: IMPACT ANALYSIS ---
         if (impactAnalysis) {
-            pdf.addPage();
-            pageNumber++;
-            addHeaderAndFooter(pageNumber);
-            addTextBox('Análisis de Impacto General', { isTitle: true, fontSize: 18 });
+            addPageWithHeader();
+            addTextBox('Análisis de Impacto General (Generado por IA)', { isTitle: true, fontSize: 18 });
             y += 5;
-            pdf.setFillColor(240, 244, 255);
-            const impactLines = pdf.splitTextToSize(impactAnalysis, contentWidth);
-            const impactHeight = impactLines.length * 6 + 10;
-            pdf.roundedRect(margin - 2, y - 4, contentWidth + 4, impactHeight, 3, 3, 'F');
             addTextBox(impactAnalysis, { fontSize: 11 });
         }
         
-        // --- FAILED TEST CASES ---
+        // --- SUBSEQUENT PAGES: FAILED TEST CASES ---
         if (failedCases.length > 0) {
-            pdf.addPage();
-            pageNumber++;
-            addHeaderAndFooter(pageNumber);
+            addPageWithHeader();
             addTextBox('Detalle de Casos de Prueba Fallidos', { isTitle: true, fontSize: 18 });
             y += 5;
 
             for (const tc of failedCases) {
-                const cardStartY = y;
-
-                const estimateHeight = () => {
-                  let h = 20; // Header and initial padding
-                  const fields = [tc.descripcion, tc.pasoAPaso, tc.datosPrueba, tc.resultadoEsperado, tc.comentarios, tc.evidencia];
-                  fields.forEach(f => {
-                     if (f && !f.startsWith('data:image')) {
-                       h += pdf.splitTextToSize(f, contentWidth - 4).length * 5 + 8;
-                     }
-                  });
-                  if (tc.evidencia && tc.evidencia.startsWith('data:image')) h += 60; // Approx image height
-                  return h;
-                };
-
-                if (y + estimateHeight() > pdf.internal.pageSize.getHeight() - margin) {
-                    pdf.addPage();
-                    pageNumber++;
-                    addHeaderAndFooter(pageNumber);
-                }
-                
-                const cardHeaderY = y;
-                pdf.setFillColor(245, 245, 245);
-                pdf.rect(margin, y, contentWidth, 12, 'F');
-                pdf.setFont('helvetica', 'bold').setFontSize(12).setTextColor(51, 51, 51);
-                pdf.text(`CASO: ${tc.casoPrueba} — ${tc.proceso}`, margin + 2, y + 8);
-                y += 18;
-
-                const renderField = (label, value, isCode = false, color = [0,0,0]) => {
+                const renderField = (label: string, value: string, isCode = false, color = [0,0,0]) => {
                   if (!value) return;
                   addTextBox(label, { isSubtitle: true, fontSize: 10, fontStyle: 'bold' });
                   addTextBox(value, { isCode, color, fontSize: 10 });
                 }
 
+                // Estimate card height to decide if new page is needed
+                let estimatedHeight = 20; // for header
+                const fields = [tc.descripcion, tc.pasoAPaso, tc.datosPrueba, tc.resultadoEsperado, tc.comentarios, tc.evidencia];
+                fields.forEach(f => {
+                    if (f && !f.startsWith('data:image')) {
+                        estimatedHeight += (pdf.splitTextToSize(f, contentWidth - 4).length * 5) + 8;
+                    }
+                });
+                if (tc.evidencia && tc.evidencia.startsWith('data:image')) estimatedHeight += 60; // Approx image height
+                
+                if (y + estimatedHeight > pdf.internal.pageSize.getHeight() - margin - 10) {
+                    addPageWithHeader();
+                }
+                
+                const cardStartY = y;
+                
+                pdf.setFillColor(245, 245, 245);
+                pdf.rect(margin, y - 5, contentWidth, 12, 'F');
+                pdf.setFont('helvetica', 'bold').setFontSize(12).setTextColor(51, 51, 51);
+                pdf.text(`CASO: ${tc.casoPrueba} — ${tc.proceso}`, margin + 2, y + 2);
+                y += 13;
+                
                 renderField('Descripción:', tc.descripcion);
                 renderField('Paso a Paso:', tc.pasoAPaso, true);
                 renderField('Datos de Prueba:', tc.datosPrueba);
@@ -731,12 +686,10 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                         const imgWidth = contentWidth - 4;
                         const imgHeight = (img.height * imgWidth) / img.width;
                         
-                        if (y + imgHeight > pdf.internal.pageSize.getHeight() - margin) {
-                            pdf.addPage();
-                            pageNumber++;
-                            addHeaderAndFooter(pageNumber);
+                        if (y + imgHeight > pdf.internal.pageSize.getHeight() - margin - 10) {
+                            addPageWithHeader();
                         }
-                        pdf.addImage(tc.evidencia, 'PNG', margin + 2, y, imgWidth, imgHeight);
+                        pdf.addImage(tc.evidencia, 'PNG', margin + 2, y, imgWidth, imgHeight, undefined, 'FAST');
                         y += imgHeight + 5;
                     } catch (e) { addTextBox('Error al cargar imagen', {}); }
                 } else if (tc.evidencia) {
@@ -747,15 +700,13 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                 
                 const cardFinalY = y;
                 pdf.setDrawColor(224, 224, 224);
-                pdf.rect(margin, cardHeaderY, contentWidth, cardFinalY - cardHeaderY - 5, 'S');
+                pdf.rect(margin, cardStartY - 5, contentWidth, cardFinalY - cardStartY, 'S');
                 y += 5;
             }
         }
         
-        // --- STATISTICS ---
-        pdf.addPage();
-        pageNumber++;
-        addHeaderAndFooter(pageNumber);
+        // --- LAST PAGE: STATISTICS ---
+        addPageWithHeader();
         addTextBox('Estadísticas y Visualización', { isTitle: true, fontSize: 18 });
         y += 5;
 
@@ -763,22 +714,23 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         const barChartEl = document.getElementById('pdf-bar-chart-card');
         
         if (pieChartEl && barChartEl) {
-          const addChart = async (element, options) => {
-              const canvas = await html2canvas(element, { scale: 3, backgroundColor: null, useCORS: true });
-              const imgData = canvas.toDataURL('image/png', 1.0);
+          const addChart = async (element: HTMLElement, options: { width: number; x: number; y: number; }) => {
+              const canvas = await html2canvas(element, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
+              const imgData = canvas.toDataURL('image/png');
               const imgWidth = options.width;
               const imgHeight = (canvas.height * imgWidth) / canvas.width;
               
-              if (y + imgHeight > pdf.internal.pageSize.getHeight() - margin) {
-                  pdf.addPage(); pageNumber++; addHeaderAndFooter(pageNumber);
+              if (options.y + imgHeight > pdf.internal.pageSize.getHeight() - margin) {
+                  addPageWithHeader();
+                  options.y = y; // Reset y for the new page
               }
-              pdf.addImage(imgData, 'PNG', options.x, y, imgWidth, imgHeight);
+              pdf.addImage(imgData, 'PNG', options.x, options.y, imgWidth, imgHeight, undefined, 'FAST');
               return imgHeight;
           };
           
           const chartWidth = contentWidth / 2 - 5;
-          await addChart(pieChartEl, { width: chartWidth, x: margin });
-          await addChart(barChartEl, { width: chartWidth, x: margin + chartWidth + 10 });
+          const pieHeight = await addChart(pieChartEl, { width: chartWidth, x: margin, y: y });
+          await addChart(barChartEl, { width: chartWidth, x: margin + chartWidth + 10, y: y });
         }
 
         pdf.save(`reporte-fallos-${format(new Date(), 'yyyy-MM-dd')}.pdf`);
@@ -789,7 +741,6 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         setIsDownloadingPdf(false);
     }
   };
-
 
   const resetDialog = () => {
     setImpactAnalysis(null);

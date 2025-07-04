@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useRef, useCallback, memo, type ChangeEvent } from 'react';
+import { db } from '@/lib/firebase';
+import { collection, query, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch, getDocs } from 'firebase/firestore';
 import {
   Bar,
   BarChart,
@@ -49,25 +51,30 @@ const statusIcons: Record<TestCaseStatus, React.ReactNode> = {
 }
 
 const TestwareLogo = ({ className }: { className?: string }) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={cn("h-6 w-6 text-primary", className)}
-  >
-    <path d="m15 15-3.375-3.375" />
-    <path d="M19 11a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z" />
-    <path d="M22 22 18 18" />
-    <path d="M13.723 10.377a5.002 5.002 0 0 0-4.098 4.098" />
-    <path d="M18 12a2 2 0 0 1-2-2" />
-    <path d="M14 8a2 2 0 0 1-2-2" />
-    <path d="M12 6a2 2 0 0 0-2-2" />
-    <path d="8 10a2 2 0 0 0-2-2" />
-  </svg>
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={cn("h-6 w-6 text-primary", className)}
+    >
+      <path d="m21.54 11.54-1.3-1.3a1.5 1.5 0 0 0-2.12 0l-1.31 1.31" />
+      <path d="M12.31 7.41a5.03 5.03 0 0 1 2.28-2.28" />
+      <path d="M15.83 1.83l1.59 1.59a2 2 0 0 1 0 2.82l-1.42 1.42" />
+      <path d="M11 10.5a1.5 1.5 0 0 1-2.12 0L7.57 9.17" />
+      <path d="M6.17 10.57a5.03 5.03 0 0 1-2.28 2.28" />
+      <path d="M4.76 16.59l-1.59-1.59a2 2 0 0 1 0-2.82l1.42-1.42" />
+      <path d="m21 21-1.41-1.41" />
+      <path d="M3.17 3.17a2.5 2.5 0 0 1-.5-3.46l.5-.5" />
+      <path d="M14.5 17.5a2.5 2.5 0 0 1 3.46-.5l.5.5" />
+      <path d="m15 15-3.375-3.375" />
+      <path d="m9.17 7.57-1.31-1.31a1.5 1.5 0 0 0-2.12 0L4.44 7.56" />
+      <path d="M18.73 16.83a5.04 5.04 0 0 1-2.28 2.28" />
+      <path d="M16.83 4.76l-1.59-1.59a2 2 0 0 0-2.82 0l-1.42 1.42" />
+    </svg>
 );
 
 // A simple polyfill for crypto.randomUUID() for broader browser compatibility
@@ -80,6 +87,7 @@ const simpleUUID = () => {
   });
 };
 
+
 const TestwareDashboard: React.FC = () => {
   const [testCases, setTestCases] = useState<TestCase[]>([]);
   const [filterProcess, setFilterProcess] = useState<string>('all');
@@ -88,25 +96,25 @@ const TestwareDashboard: React.FC = () => {
   const { toast } = useToast();
 
   useEffect(() => {
-    try {
-      const savedCases = localStorage.getItem('TESTWARE-cases');
-      if (savedCases) {
-        setTestCases(JSON.parse(savedCases));
-      }
-    } catch (error) {
-      console.error("Failed to load from localStorage", error);
-      toast({ title: "Error", description: "Could not load data from local storage.", variant: "destructive" });
-    }
-  }, [toast]);
+    if (!db) return;
+    const q = query(collection(db, "testcases"));
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const casesFromDb: TestCase[] = [];
+      querySnapshot.forEach((doc) => {
+        // The document ID is not part of doc.data(), so we add it manually
+        casesFromDb.push({ ...doc.data(), id: doc.id } as TestCase);
+      });
+       // Sort cases by case ID to maintain a consistent order
+      casesFromDb.sort((a, b) => (a.casoPrueba || "").localeCompare(b.casoPrueba || ""));
+      setTestCases(casesFromDb);
+    }, (error) => {
+      console.error("Error listening to Firestore:", error);
+      toast({ title: "Error de Conexión", description: "No se pudo conectar a la base de datos.", variant: "destructive" });
+    });
 
-  useEffect(() => {
-    try {
-      localStorage.setItem('TESTWARE-cases', JSON.stringify(testCases));
-    } catch (error) {
-      console.error("Failed to save to localStorage", error);
-      toast({ title: "Error", description: "Could not save data to local storage.", variant: "destructive" });
-    }
-  }, [testCases, toast]);
+    // Cleanup subscription on component unmount
+    return () => unsubscribe();
+  }, [toast]);
 
   const processes = useMemo(() => ['all', ...Array.from(new Set(testCases.map(tc => tc.proceso))).filter(Boolean)], [testCases]);
 
@@ -133,18 +141,27 @@ const TestwareDashboard: React.FC = () => {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const json = JSON.parse(event.target?.result as string);
-        const newCases: TestCase[] = json.map((c: any) => ({
-          ...c,
-          id: simpleUUID(),
-          estado: c.estado || 'pending'
-        }));
-        setTestCases(newCases);
-        toast({ title: "Éxito", description: `${newCases.length} casos de prueba cargados.` });
+        const batch = writeBatch(db);
+        
+        json.forEach((c: any) => {
+            const newId = simpleUUID();
+            const newCaseData = {
+              ...c,
+              estado: c.estado || 'pending'
+            };
+            // Do not add the id to the document data
+            delete newCaseData.id; 
+            const docRef = doc(db, 'testcases', newId);
+            batch.set(docRef, newCaseData);
+        });
+
+        await batch.commit();
+        toast({ title: "Éxito", description: `${json.length} casos de prueba cargados.` });
       } catch (error) {
-        console.error("Failed to parse JSON", error);
+        console.error("Failed to parse or upload JSON", error);
         toast({ title: "Fallo la Carga", description: "Por favor, carga un archivo JSON válido.", variant: "destructive" });
       }
     };
@@ -152,38 +169,57 @@ const TestwareDashboard: React.FC = () => {
     if(fileInputRef.current) fileInputRef.current.value = "";
   };
   
-  const handleUpdate = useCallback((id: string, field: keyof TestCase, value: string | TestCaseStatus) => {
-    let isValid = true;
+  const handleUpdate = useCallback(async (id: string, field: keyof TestCase, value: string | TestCaseStatus) => {
+    const testCaseToUpdate = testCases.find(tc => tc.id === id);
+    if (!testCaseToUpdate) return;
+  
+    // Perform validation before updating the state
     if (field === 'estado' && value === 'Failed') {
-      const testCaseToUpdate = testCases.find(tc => tc.id === id);
-      if (testCaseToUpdate && (!testCaseToUpdate.comentarios?.trim() || !testCaseToUpdate.evidencia?.trim())) {
+      // Create a temporary updated object for validation
+      const updatedTestCase = { ...testCaseToUpdate, [field]: value };
+      if (!updatedTestCase.comentarios?.trim() || !updatedTestCase.evidencia?.trim()) {
         toast({
           title: "Información Requerida",
           description: "Comentarios y Evidencia son requeridos para marcar como Fallido.",
           variant: "destructive",
         });
-        isValid = false;
+        return; // Stop the update
       }
     }
-
-    if (isValid) {
-      setTestCases(prev => 
-        prev.map(tc => 
-          tc.id === id ? { ...tc, [field]: value } : tc
-        )
-      );
+    
+    try {
+      const docRef = doc(db, 'testcases', id);
+      await updateDoc(docRef, { [field]: value });
+    } catch (error) {
+      console.error("Error updating document:", error);
+      toast({ title: "Error", description: "No se pudo actualizar el caso de prueba.", variant: "destructive" });
     }
   }, [testCases, toast]);
   
-  const handleDeleteTestCase = useCallback((id: string) => {
-    setTestCases(prev => prev.filter(tc => tc.id !== id));
-    toast({ title: "Caso de prueba eliminado", variant: "destructive" });
+  const handleDeleteTestCase = useCallback(async (id: string) => {
+    try {
+      await deleteDoc(doc(db, "testcases", id));
+      toast({ title: "Caso de prueba eliminado", variant: "destructive" });
+    } catch(error) {
+       console.error("Error deleting document:", error);
+       toast({ title: "Error", description: "No se pudo eliminar el caso de prueba.", variant: "destructive" });
+    }
   }, [toast]);
 
-  const handleClearData = () => {
-    setTestCases([]);
-    localStorage.removeItem('TESTWARE-cases');
-    toast({ title: "Datos eliminados", description: "Todos los casos de prueba han sido eliminados.", variant: "destructive" });
+  const handleClearData = async () => {
+    try {
+      const testCasesCollection = collection(db, 'testcases');
+      const testCasesSnapshot = await getDocs(testCasesCollection);
+      const batch = writeBatch(db);
+      testCasesSnapshot.forEach(doc => {
+          batch.delete(doc.ref);
+      });
+      await batch.commit();
+      toast({ title: "Datos eliminados", description: "Todos los casos de prueba han sido eliminados.", variant: "destructive" });
+    } catch(error) {
+       console.error("Error clearing data:", error);
+       toast({ title: "Error", description: "No se pudieron eliminar los datos.", variant: "destructive" });
+    }
   };
 
   return (
@@ -389,26 +425,6 @@ const Sidebar = ({ stats, processes, filterProcess, setFilterProcess, filterStat
 const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCase, onUpdate: Function, onDelete: Function }) => {
   const evidenceInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
-  
-  const [comments, setComments] = useState(testCase.comentarios);
-
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      if (comments !== testCase.comentarios) {
-        onUpdate(testCase.id, 'comentarios', comments);
-      }
-    }, 500);
-
-    return () => clearTimeout(handler);
-  }, [comments, testCase.comentarios, testCase.id, onUpdate]);
-  
-  useEffect(() => {
-    if (testCase.comentarios !== comments) {
-      setComments(testCase.comentarios);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [testCase.comentarios]);
-
 
   const handleEvidenceSelect = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -476,22 +492,24 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCas
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t">
           <div className="space-y-2">
             <Label htmlFor={`comments-${testCase.id}`} className="font-semibold">Comentarios</Label>
-            <Textarea 
+            <Textarea
               id={`comments-${testCase.id}`}
-              value={comments} 
-              onChange={e => setComments(e.target.value)} 
-              className="min-h-[100px] bg-background/50" 
+              key={`comments-${testCase.id}`} // Force re-render if case changes
+              defaultValue={testCase.comentarios}
+              onBlur={(e) => onUpdate(testCase.id, 'comentarios', e.target.value)}
+              className="min-h-[100px] bg-background/50"
               placeholder={testCase.estado === 'Failed' ? 'Razón del fallo requerida' : 'Comentarios adicionales...'}
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor={`evidence-${testCase.id}`} className="font-semibold">Evidencia</Label>
+            <Label htmlFor={`evidence-input-${testCase.id}`} className="font-semibold">Evidencia</Label>
             <div className="flex items-center gap-2">
               <Input
-                id={`evidence-${testCase.id}`} 
-                value={testCase.evidencia} 
-                onChange={e => onUpdate(testCase.id, 'evidencia', e.target.value)} 
+                id={`evidence-input-${testCase.id}`}
+                key={`evidence-${testCase.id}`}
+                defaultValue={testCase.evidencia}
+                onBlur={e => onUpdate(testCase.id, 'evidencia', e.target.value)}
                 placeholder={testCase.estado === 'Failed' ? 'URL de evidencia requerida' : 'Pega la URL o carga una imagen'}
                 className="bg-background/50"
               />
@@ -577,36 +595,36 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         const addHeaderAndFooter = (pageNum: number) => {
             if (pageNum > 1) {
                 pdf.setPage(pageNum);
-                pdf.setFontSize(10);
-                pdf.setTextColor(100);
-                pdf.text('Informe de Hallazgos de QA', margin, margin - 5);
-                pdf.setLineWidth(0.5);
-                pdf.line(margin, margin, pdfWidth - margin, margin);
-                pdf.setTextColor(150);
-                pdf.text(`Página ${pageNum}`, pdfWidth - margin, pdf.internal.pageSize.getHeight() - margin + 10, { align: 'right' });
             }
+            pdf.setFontSize(10);
+            pdf.setTextColor(100);
+            pdf.text('Informe de Hallazgos de QA', margin, margin - 5);
+            pdf.setLineWidth(0.5);
+            pdf.line(margin, margin, pdfWidth - margin, margin);
+            pdf.setTextColor(150);
+            pdf.text(`Página ${pageNum}`, pdfWidth - margin, pdf.internal.pageSize.getHeight() - margin + 10, { align: 'right' });
+            y = margin + 5;
         };
-
+        
         const addTextBox = (text: string, options: any = {}) => {
-            const { isTitle = false, isSubtitle = false, isCode = false, color = [0, 0, 0], fontSize = 10, fontStyle = 'normal' } = options;
-            
-            pdf.setFont('helvetica', fontStyle);
-            if (isCode) pdf.setFont('courier', 'normal');
-            pdf.setFontSize(fontSize);
-            pdf.setTextColor(color[0], color[1], color[2]);
+          const { isTitle = false, isSubtitle = false, isCode = false, color = [0, 0, 0], fontSize = 10, fontStyle = 'normal' } = options;
+      
+          pdf.setFont('helvetica', fontStyle);
+          if (isCode) pdf.setFont('courier', 'normal');
+          pdf.setFontSize(fontSize);
+          pdf.setTextColor(color[0], color[1], color[2]);
+      
+          const lines = pdf.splitTextToSize(text || '-', contentWidth - (isSubtitle ? 4 : 0));
+          const textHeight = lines.length * (fontSize / 2.5) + (lines.length > 1 ? (lines.length - 1) * 2 : 0); // Approximate height with line spacing
 
-            const lines = pdf.splitTextToSize(text || '-', contentWidth - (isSubtitle ? 4 : 0));
-            const textHeight = lines.length * (fontSize / 2.5); // Approximate height
-
-            if (y + textHeight > pdf.internal.pageSize.getHeight() - margin) {
-                pdf.addPage();
-                pageNumber++;
-                addHeaderAndFooter(pageNumber);
-                y = margin + 5;
-            }
-
-            pdf.text(lines, margin + (isSubtitle ? 2 : 0), y);
-            y += textHeight + 4; // Add padding
+          if (y + textHeight > pdf.internal.pageSize.getHeight() - margin) {
+              pdf.addPage();
+              pageNumber++;
+              addHeaderAndFooter(pageNumber);
+          }
+      
+          pdf.text(lines, margin + (isSubtitle ? 2 : 0), y);
+          y += textHeight + 4; // Add padding
         };
 
         // --- COVER PAGE ---
@@ -633,11 +651,12 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
             pdf.addPage();
             pageNumber++;
             addHeaderAndFooter(pageNumber);
-            y = margin + 5;
             addTextBox('Resumen del Reporte', { isTitle: true, fontSize: 18 });
             y += 5;
             pdf.setFillColor(249, 249, 249);
-            pdf.roundedRect(margin -2 , y-4, contentWidth + 4, pdf.splitTextToSize(reportDescription, contentWidth).length * 5 + 10, 3, 3, 'F');
+            const summaryLines = pdf.splitTextToSize(reportDescription, contentWidth);
+            const summaryHeight = summaryLines.length * 5 + 10;
+            pdf.roundedRect(margin - 2, y - 4, contentWidth + 4, summaryHeight, 3, 3, 'F');
             addTextBox(reportDescription, { fontSize: 11 });
         }
         
@@ -646,11 +665,12 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
             pdf.addPage();
             pageNumber++;
             addHeaderAndFooter(pageNumber);
-            y = margin + 5;
             addTextBox('Análisis de Impacto General', { isTitle: true, fontSize: 18 });
             y += 5;
             pdf.setFillColor(240, 244, 255);
-            pdf.roundedRect(margin - 2, y - 4, contentWidth + 4, pdf.splitTextToSize(impactAnalysis, contentWidth).length * 6 + 10, 3, 3, 'F');
+            const impactLines = pdf.splitTextToSize(impactAnalysis, contentWidth);
+            const impactHeight = impactLines.length * 6 + 10;
+            pdf.roundedRect(margin - 2, y - 4, contentWidth + 4, impactHeight, 3, 3, 'F');
             addTextBox(impactAnalysis, { fontSize: 11 });
         }
         
@@ -659,32 +679,31 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
             pdf.addPage();
             pageNumber++;
             addHeaderAndFooter(pageNumber);
-            y = margin + 5;
             addTextBox('Detalle de Casos de Prueba Fallidos', { isTitle: true, fontSize: 18 });
             y += 5;
 
             for (const tc of failedCases) {
-                const cardContentHeight = () => {
-                    let h = 20; // Initial padding
-                    const fields = [tc.descripcion, tc.pasoAPaso, tc.datosPrueba, tc.resultadoEsperado, tc.comentarios];
-                    fields.forEach(f => {
-                       h += pdf.splitTextToSize(f || '-', contentWidth - 4).length * 5 + 4;
-                    });
-                     if (tc.evidencia) {
-                        if (tc.evidencia.startsWith('data:image')) h += 60; // Approx image height
-                        else h += pdf.splitTextToSize(tc.evidencia, contentWidth-4).length * 5 + 4;
-                    }
-                    return h;
+                const cardStartY = y;
+
+                const estimateHeight = () => {
+                  let h = 20; // Header and initial padding
+                  const fields = [tc.descripcion, tc.pasoAPaso, tc.datosPrueba, tc.resultadoEsperado, tc.comentarios, tc.evidencia];
+                  fields.forEach(f => {
+                     if (f && !f.startsWith('data:image')) {
+                       h += pdf.splitTextToSize(f, contentWidth - 4).length * 5 + 8;
+                     }
+                  });
+                  if (tc.evidencia && tc.evidencia.startsWith('data:image')) h += 60; // Approx image height
+                  return h;
                 };
 
-                if (y + cardContentHeight() > pdf.internal.pageSize.getHeight() - margin) {
+                if (y + estimateHeight() > pdf.internal.pageSize.getHeight() - margin) {
                     pdf.addPage();
                     pageNumber++;
                     addHeaderAndFooter(pageNumber);
-                    y = margin + 5;
                 }
                 
-                const cardStartY = y;
+                const cardHeaderY = y;
                 pdf.setFillColor(245, 245, 245);
                 pdf.rect(margin, y, contentWidth, 12, 'F');
                 pdf.setFont('helvetica', 'bold').setFontSize(12).setTextColor(51, 51, 51);
@@ -692,6 +711,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                 y += 18;
 
                 const renderField = (label, value, isCode = false, color = [0,0,0]) => {
+                  if (!value) return;
                   addTextBox(label, { isSubtitle: true, fontSize: 10, fontStyle: 'bold' });
                   addTextBox(value, { isCode, color, fontSize: 10 });
                 }
@@ -715,19 +735,19 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                             pdf.addPage();
                             pageNumber++;
                             addHeaderAndFooter(pageNumber);
-                            y = margin + 5;
                         }
                         pdf.addImage(tc.evidencia, 'PNG', margin + 2, y, imgWidth, imgHeight);
                         y += imgHeight + 5;
                     } catch (e) { addTextBox('Error al cargar imagen', {}); }
                 } else if (tc.evidencia) {
-                    renderField('', tc.evidencia, false, [41, 128, 185]);
+                    addTextBox(tc.evidencia, { isCode: false, color: [41, 128, 185], fontSize: 10 });
                 } else {
-                    addTextBox('-', {});
+                    addTextBox('-', { fontSize: 10 });
                 }
                 
+                const cardFinalY = y;
                 pdf.setDrawColor(224, 224, 224);
-                pdf.rect(margin, cardStartY, contentWidth, y - cardStartY - 5, 'S');
+                pdf.rect(margin, cardHeaderY, contentWidth, cardFinalY - cardHeaderY - 5, 'S');
                 y += 5;
             }
         }
@@ -736,7 +756,6 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         pdf.addPage();
         pageNumber++;
         addHeaderAndFooter(pageNumber);
-        y = margin + 5;
         addTextBox('Estadísticas y Visualización', { isTitle: true, fontSize: 18 });
         y += 5;
 
@@ -751,14 +770,14 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
               const imgHeight = (canvas.height * imgWidth) / canvas.width;
               
               if (y + imgHeight > pdf.internal.pageSize.getHeight() - margin) {
-                  pdf.addPage(); pageNumber++; addHeaderAndFooter(pageNumber); y = margin + 5;
+                  pdf.addPage(); pageNumber++; addHeaderAndFooter(pageNumber);
               }
               pdf.addImage(imgData, 'PNG', options.x, y, imgWidth, imgHeight);
               return imgHeight;
           };
           
           const chartWidth = contentWidth / 2 - 5;
-          const pieHeight = await addChart(pieChartEl, { width: chartWidth, x: margin });
+          await addChart(pieChartEl, { width: chartWidth, x: margin });
           await addChart(barChartEl, { width: chartWidth, x: margin + chartWidth + 10 });
         }
 
@@ -770,6 +789,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         setIsDownloadingPdf(false);
     }
   };
+
 
   const resetDialog = () => {
     setImpactAnalysis(null);

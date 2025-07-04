@@ -149,16 +149,15 @@ const TestwareDashboard: React.FC = () => {
       const tcIndex = newTestCases.findIndex(tc => tc.id === id);
       if (tcIndex === -1) return prev; 
       
-      const testCase = newTestCases[tcIndex];
+      const testCaseToUpdate = newTestCases[tcIndex];
 
       if (field === 'estado' && value === 'Failed') {
-        if (!testCase.comentarios || testCase.comentarios.trim() === '' || !testCase.evidencia || testCase.evidencia.trim() === '') {
+        if (!testCaseToUpdate.comentarios || testCaseToUpdate.comentarios.trim() === '' || !testCaseToUpdate.evidencia || testCaseToUpdate.evidencia.trim() === '') {
           toast({
             title: "Información Requerida",
             description: "Comentarios y Evidencia son requeridos antes de marcar un caso de prueba como Fallido.",
             variant: "destructive",
           });
-          // Do not update the state if validation fails
           return prev;
         }
       }
@@ -580,7 +579,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
       <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #333; background-color: white;">
         
         <!-- PAGE 1: COVER -->
-        <div style="display: flex; flex-direction: column; min-height: 1123px; padding: 60px; box-sizing: border-box; border: 1px solid #eee;">
+        <div style="display: flex; flex-direction: column; min-height: 1123px; padding: 60px; box-sizing: border-box; border: 1px solid #eee; page-break-inside: avoid; page-break-after: always;">
           <div style="text-align: center; margin-bottom: 40px;">
             <h1 style="font-size: 32px; color: #5D54A4; margin: 0; font-weight: 600;">Informe de Hallazgos de QA</h1>
             <p style="font-size: 16px; color: #777; margin-top: 5px;">TESTWARE</p>
@@ -640,7 +639,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
             `).join('')}
 
             <h2 style="font-size: 24px; color: #5D54A4; border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-top: 40px; margin-bottom: 20px; font-weight: 600; page-break-before: always;">Análisis de Impacto General</h2>
-            <div style="background: #f0f4ff; border-left: 4px solid #5D54A4; padding: 20px; border-radius: 5px;">
+            <div style="background: #f0f4ff; border-left: 4px solid #5D54A4; padding: 20px; border-radius: 5px; page-break-inside: avoid;">
               <pre style="white-space: pre-wrap; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #333; margin: 0;">${escapeHtml(impactAnalysis || '')}</pre>
             </div>
         </div>

@@ -70,6 +70,15 @@ const TestwareLogo = ({ className }: { className?: string }) => (
   </svg>
 );
 
+// A simple polyfill for crypto.randomUUID() for broader browser compatibility
+const simpleUUID = () => {
+  // A basic UUID v4 generator
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
 
 const TestwareDashboard: React.FC = () => {
   const [testCases, setTestCases] = useState<TestCase[]>([]);
@@ -129,7 +138,7 @@ const TestwareDashboard: React.FC = () => {
         const json = JSON.parse(event.target?.result as string);
         const newCases: TestCase[] = json.map((c: any) => ({
           ...c,
-          id: crypto.randomUUID(),
+          id: simpleUUID(),
           estado: c.estado || 'pending'
         }));
         setTestCases(newCases);
@@ -144,30 +153,27 @@ const TestwareDashboard: React.FC = () => {
   };
   
   const handleUpdate = useCallback((id: string, field: keyof TestCase, value: string | TestCaseStatus) => {
-    setTestCases(prev => {
-      const tcIndex = prev.findIndex(tc => tc.id === id);
-      if (tcIndex === -1) return prev;
-      
-      const testCaseToUpdate = prev[tcIndex];
-      
-      if (field === 'estado' && value === 'Failed') {
-        if (!testCaseToUpdate.comentarios?.trim() || !testCaseToUpdate.evidencia?.trim()) {
-           // We show the toast outside of the setState call
-           // This will be executed after the state update is complete.
-          setTimeout(() => toast({
-            title: "Información Requerida",
-            description: "Comentarios y Evidencia son requeridos para marcar como Fallido.",
-            variant: "destructive",
-          }), 0);
-          return prev; // Revert the change by returning the previous state
-        }
+    let isValid = true;
+    if (field === 'estado' && value === 'Failed') {
+      const testCaseToUpdate = testCases.find(tc => tc.id === id);
+      if (testCaseToUpdate && (!testCaseToUpdate.comentarios?.trim() || !testCaseToUpdate.evidencia?.trim())) {
+        toast({
+          title: "Información Requerida",
+          description: "Comentarios y Evidencia son requeridos para marcar como Fallido.",
+          variant: "destructive",
+        });
+        isValid = false;
       }
-      
-      return prev.map(tc => 
-        tc.id === id ? { ...tc, [field]: value } : tc
+    }
+
+    if (isValid) {
+      setTestCases(prev => 
+        prev.map(tc => 
+          tc.id === id ? { ...tc, [field]: value } : tc
+        )
       );
-    });
-  }, [toast]);
+    }
+  }, [testCases, toast]);
   
   const handleDeleteTestCase = useCallback((id: string) => {
     setTestCases(prev => prev.filter(tc => tc.id !== id));
@@ -557,37 +563,52 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
     }
   };
 
-  const handleDownloadPdf = () => {
+  const handleDownloadPdf = async () => {
     setIsDownloadingPdf(true);
 
-    setTimeout(async () => {
-      const reportContainer = document.createElement('div');
-      reportContainer.style.position = 'absolute';
-      reportContainer.style.left = '-9999px';
-      reportContainer.style.width = '800px';
-      document.body.appendChild(reportContainer);
-
-      try {
+    try {
         const pdf = new jsPDF('p', 'mm', 'a4');
         const pdfWidth = pdf.internal.pageSize.getWidth();
-        const pdfHeight = pdf.internal.pageSize.getHeight();
         const margin = 15;
         const contentWidth = pdfWidth - (margin * 2);
-        let currentPage = 1;
         let y = margin;
+        let pageNumber = 1;
 
-        const addHeaderAndFooter = (pageNumber: number) => {
-          pdf.setPage(pageNumber);
-          pdf.setFontSize(10);
-          pdf.setTextColor(100);
-          pdf.text('Informe de Hallazgos de QA', margin, margin - 5);
-          pdf.setLineWidth(0.5);
-          pdf.line(margin, margin, pdfWidth - margin, margin);
-
-          pdf.setTextColor(150);
-          pdf.text(`Página ${pageNumber}`, pdfWidth - margin, pdfHeight - margin + 10, { align: 'right' });
+        const addHeaderAndFooter = (pageNum: number) => {
+            if (pageNum > 1) {
+                pdf.setPage(pageNum);
+                pdf.setFontSize(10);
+                pdf.setTextColor(100);
+                pdf.text('Informe de Hallazgos de QA', margin, margin - 5);
+                pdf.setLineWidth(0.5);
+                pdf.line(margin, margin, pdfWidth - margin, margin);
+                pdf.setTextColor(150);
+                pdf.text(`Página ${pageNum}`, pdfWidth - margin, pdf.internal.pageSize.getHeight() - margin + 10, { align: 'right' });
+            }
         };
-        
+
+        const addTextBox = (text: string, options: any = {}) => {
+            const { isTitle = false, isSubtitle = false, isCode = false, color = [0, 0, 0], fontSize = 10, fontStyle = 'normal' } = options;
+            
+            pdf.setFont('helvetica', fontStyle);
+            if (isCode) pdf.setFont('courier', 'normal');
+            pdf.setFontSize(fontSize);
+            pdf.setTextColor(color[0], color[1], color[2]);
+
+            const lines = pdf.splitTextToSize(text || '-', contentWidth - (isSubtitle ? 4 : 0));
+            const textHeight = lines.length * (fontSize / 2.5); // Approximate height
+
+            if (y + textHeight > pdf.internal.pageSize.getHeight() - margin) {
+                pdf.addPage();
+                pageNumber++;
+                addHeaderAndFooter(pageNumber);
+                y = margin + 5;
+            }
+
+            pdf.text(lines, margin + (isSubtitle ? 2 : 0), y);
+            y += textHeight + 4; // Add padding
+        };
+
         // --- COVER PAGE ---
         const currentDate = new Date();
         const formattedDate = format(currentDate, 'dd / MM / yyyy');
@@ -595,216 +616,160 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         const capitalizedPeriod = evaluatedPeriod.charAt(0).toUpperCase() + evaluatedPeriod.slice(1);
         const uniqueProcesses = [...new Set(allCases.map(tc => tc.proceso).filter(Boolean))];
 
-        const coverHtml = `
-          <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #333; background-color: white; display: flex; flex-direction: column; justify-content: space-between; height: ${pdfHeight * (800 / pdfWidth)}px; padding: 60px; box-sizing: border-box;">
-            <div style="text-align: center;">
-              <h1 style="font-size: 32px; color: #5D54A4; margin: 0; font-weight: 600;">Informe de Hallazgos de QA</h1>
-              <p style="font-size: 16px; color: #777; margin-top: 5px;">TESTWARE</p>
-            </div>
-            <div style="font-size: 14px; border-top: 1px solid #eee; border-bottom: 1px solid #eee; padding: 20px 0;">
-              <table style="width: 100%; border-collapse: collapse;">
-                <tr><td style="padding: 8px 10px; width: 50%;"><strong>Elaborado por:</strong> ${authorName}</td><td style="padding: 8px 10px; width: 50%;"><strong>Fecha:</strong> ${formattedDate}</td></tr>
-                <tr><td style="padding: 8px 10px;" colspan="2"><strong>Período Evaluado:</strong> ${capitalizedPeriod}</td></tr>
-              </table>
-            </div>
-            <div>
-              <h2 style="font-size: 18px; border-bottom: 1px solid #ddd; padding-bottom: 8px; color: #444; font-weight: 600;">Procesos Evaluados</h2>
-              <ul style="padding-left: 20px; list-style-type: disc; color: #555; line-height: 1.8; columns: 2;">${uniqueProcesses.map(p => `<li>${p}</li>`).join('')}</ul>
-            </div>
-            <div style="text-align: center; font-size: 12px; color: #aaa;"><p>TESTWARE - Reporte Confidencial</p></div>
-          </div>`;
+        pdf.setFontSize(32).setFont('helvetica', 'bold').setTextColor('#5D54A4').text('Informe de Hallazgos de QA', pdfWidth / 2, 60, { align: 'center' });
+        pdf.setFontSize(16).setFont('helvetica', 'normal').setTextColor('#777').text('TESTWARE', pdfWidth / 2, 70, { align: 'center' });
         
-        reportContainer.innerHTML = coverHtml;
-        const coverCanvas = await html2canvas(reportContainer.firstElementChild as HTMLElement, { scale: 2, useCORS: true });
-        pdf.addImage(coverCanvas.toDataURL('image/png'), 'PNG', 0, 0, pdfWidth, pdfHeight);
-
-        // Helper for adding text with page breaks
-        const addTextBox = (text: string, options: any) => {
-            const { isTitle = false, isSubtitle = false, isCode = false, color = [0, 0, 0] } = options;
-            
-            pdf.setFont('helvetica', isTitle || isSubtitle ? 'bold' : 'normal');
-            if (isCode) pdf.setFont('courier', 'normal');
-            pdf.setFontSize(isTitle ? 18 : isSubtitle ? 10 : 10);
-            pdf.setTextColor(color[0], color[1], color[2]);
-
-            const lines = pdf.splitTextToSize(text || '-', isSubtitle ? contentWidth - 10 : contentWidth);
-            const textHeight = lines.length * (isTitle ? 8 : 5) + (isSubtitle ? 2 : 4);
-            
-            if (y + textHeight > pdfHeight - margin) {
-                pdf.addPage();
-                currentPage++;
-                addHeaderAndFooter(currentPage);
-                y = margin + 5;
-            }
-            if (isSubtitle) {
-                pdf.text(text, margin + 4, y);
-                y += 6;
-            } else {
-                pdf.text(lines, margin, y);
-                y += textHeight;
-            }
-        };
-
-        // Helper to add a whole section with a title and body
-        const addSection = (title: string, body: string, options: any = {}) => {
-            pdf.addPage();
-            currentPage++;
-            addHeaderAndFooter(currentPage);
-            y = margin + 5;
-
-            addTextBox(title, { isTitle: true });
-            y += 5;
-            
-            if (options.boxColor) {
-                const bodyLines = pdf.splitTextToSize(body, contentWidth - 8);
-                const bodyHeight = bodyLines.length * 5 + 12;
-                pdf.setFillColor(options.boxColor.r, options.boxColor.g, options.boxColor.b);
-                pdf.roundedRect(margin, y, contentWidth, bodyHeight, 3, 3, 'F');
-                y += 6;
-                pdf.text(bodyLines, margin + 4, y);
-                y += bodyHeight - 2;
-            } else {
-                addTextBox(body, {});
-            }
-        };
+        y = 110;
+        addTextBox(`Elaborado por: ${authorName}`, { fontSize: 12 });
+        addTextBox(`Fecha: ${formattedDate}`, { fontSize: 12 });
+        addTextBox(`Período Evaluado: ${capitalizedPeriod}`, { fontSize: 12 });
+        
+        y += 10;
+        addTextBox('Procesos Evaluados', { fontSize: 14, fontStyle: 'bold' });
+        addTextBox(uniqueProcesses.join(', '), { fontSize: 12 });
         
         // --- REPORT SUMMARY ---
         if (reportDescription) {
-            addSection('Resumen del Reporte', reportDescription, { boxColor: { r: 249, g: 249, b: 249 } });
+            pdf.addPage();
+            pageNumber++;
+            addHeaderAndFooter(pageNumber);
+            y = margin + 5;
+            addTextBox('Resumen del Reporte', { isTitle: true, fontSize: 18 });
+            y += 5;
+            pdf.setFillColor(249, 249, 249);
+            pdf.roundedRect(margin -2 , y-4, contentWidth + 4, pdf.splitTextToSize(reportDescription, contentWidth).length * 5 + 10, 3, 3, 'F');
+            addTextBox(reportDescription, { fontSize: 11 });
         }
         
         // --- IMPACT ANALYSIS ---
         if (impactAnalysis) {
-            addSection('Análisis de Impacto General', impactAnalysis, { boxColor: { r: 240, g: 244, b: 255 } });
+            pdf.addPage();
+            pageNumber++;
+            addHeaderAndFooter(pageNumber);
+            y = margin + 5;
+            addTextBox('Análisis de Impacto General', { isTitle: true, fontSize: 18 });
+            y += 5;
+            pdf.setFillColor(240, 244, 255);
+            pdf.roundedRect(margin - 2, y - 4, contentWidth + 4, pdf.splitTextToSize(impactAnalysis, contentWidth).length * 6 + 10, 3, 3, 'F');
+            addTextBox(impactAnalysis, { fontSize: 11 });
         }
         
         // --- FAILED TEST CASES ---
         if (failedCases.length > 0) {
             pdf.addPage();
-            currentPage++;
-            addHeaderAndFooter(currentPage);
+            pageNumber++;
+            addHeaderAndFooter(pageNumber);
             y = margin + 5;
-            addTextBox('Detalle de Casos de Prueba Fallidos', { isTitle: true });
+            addTextBox('Detalle de Casos de Prueba Fallidos', { isTitle: true, fontSize: 18 });
             y += 5;
 
             for (const tc of failedCases) {
-                const estimateHeight = (tc: TestCase) => {
-                    let h = 20; // Header + padding
+                const cardContentHeight = () => {
+                    let h = 20; // Initial padding
                     const fields = [tc.descripcion, tc.pasoAPaso, tc.datosPrueba, tc.resultadoEsperado, tc.comentarios];
-                    fields.forEach(f => h += (pdf.splitTextToSize(f || '-', contentWidth - 8).length * 5 + 8));
-                    if (tc.evidencia && tc.evidencia.startsWith('data:image')) {
-                        h += 65; // Approximate image height + title
-                    } else if (tc.evidencia) {
-                        h += (pdf.splitTextToSize(tc.evidencia, contentWidth - 8).length * 5 + 8);
+                    fields.forEach(f => {
+                       h += pdf.splitTextToSize(f || '-', contentWidth - 4).length * 5 + 4;
+                    });
+                     if (tc.evidencia) {
+                        if (tc.evidencia.startsWith('data:image')) h += 60; // Approx image height
+                        else h += pdf.splitTextToSize(tc.evidencia, contentWidth-4).length * 5 + 4;
                     }
                     return h;
                 };
 
-                if (y + estimateHeight(tc) > pdfHeight - margin) {
+                if (y + cardContentHeight() > pdf.internal.pageSize.getHeight() - margin) {
                     pdf.addPage();
-                    currentPage++;
-                    addHeaderAndFooter(currentPage);
+                    pageNumber++;
+                    addHeaderAndFooter(pageNumber);
                     y = margin + 5;
                 }
-
+                
                 const cardStartY = y;
-                // Card Header
                 pdf.setFillColor(245, 245, 245);
                 pdf.rect(margin, y, contentWidth, 12, 'F');
-                pdf.setFont('helvetica', 'bold');
-                pdf.setFontSize(12);
-                pdf.setTextColor(51, 51, 51);
-                pdf.text(`CASO: ${tc.casoPrueba} — ${tc.proceso}`, margin + 4, y + 8);
+                pdf.setFont('helvetica', 'bold').setFontSize(12).setTextColor(51, 51, 51);
+                pdf.text(`CASO: ${tc.casoPrueba} — ${tc.proceso}`, margin + 2, y + 8);
                 y += 18;
 
-                // Card Body
-                addTextBox('Descripción:', { isSubtitle: true });
-                addTextBox(tc.descripcion, {});
-                addTextBox('Paso a Paso:', { isSubtitle: true });
-                addTextBox(tc.pasoAPaso, { isCode: true });
-                addTextBox('Datos de Prueba:', { isSubtitle: true });
-                addTextBox(tc.datosPrueba, {});
-                addTextBox('Resultado Esperado:', { isSubtitle: true });
-                addTextBox(tc.resultadoEsperado, {});
-                addTextBox('Comentarios de QA:', { isSubtitle: true, color: [192, 57, 43] });
-                addTextBox(tc.comentarios, { color: [192, 57, 43] });
+                const renderField = (label, value, isCode = false, color = [0,0,0]) => {
+                  addTextBox(label, { isSubtitle: true, fontSize: 10, fontStyle: 'bold' });
+                  addTextBox(value, { isCode, color, fontSize: 10 });
+                }
 
-                // Evidence
-                addTextBox('Evidencia:', { isSubtitle: true });
+                renderField('Descripción:', tc.descripcion);
+                renderField('Paso a Paso:', tc.pasoAPaso, true);
+                renderField('Datos de Prueba:', tc.datosPrueba);
+                renderField('Resultado Esperado:', tc.resultadoEsperado);
+                renderField('Comentarios de QA:', tc.comentarios, false, [192, 57, 43]);
+                
+                addTextBox('Evidencia:', { isSubtitle: true, fontSize: 10, fontStyle: 'bold' });
                 if (tc.evidencia && tc.evidencia.startsWith('data:image')) {
                     try {
                         const img = new Image();
                         img.src = tc.evidencia;
-                        await new Promise(resolve => img.onload = resolve);
                         
-                        const imgWidth = contentWidth - 8;
+                        const imgWidth = contentWidth - 4;
                         const imgHeight = (img.height * imgWidth) / img.width;
-                        const finalImgHeight = Math.min(imgHeight, pdfHeight / 3);
                         
-                        if (y + finalImgHeight > pdfHeight - margin) {
+                        if (y + imgHeight > pdf.internal.pageSize.getHeight() - margin) {
                             pdf.addPage();
-                            currentPage++;
-                            addHeaderAndFooter(currentPage);
+                            pageNumber++;
+                            addHeaderAndFooter(pageNumber);
                             y = margin + 5;
                         }
-                        pdf.addImage(tc.evidencia, 'PNG', margin + 4, y, imgWidth, finalImgHeight);
-                        y += finalImgHeight + 5;
-                    } catch(e) { /* ignore image error */ }
+                        pdf.addImage(tc.evidencia, 'PNG', margin + 2, y, imgWidth, imgHeight);
+                        y += imgHeight + 5;
+                    } catch (e) { addTextBox('Error al cargar imagen', {}); }
                 } else if (tc.evidencia) {
-                    addTextBox(tc.evidencia, { color: [41, 128, 185] });
+                    renderField('', tc.evidencia, false, [41, 128, 185]);
                 } else {
                     addTextBox('-', {});
                 }
                 
                 pdf.setDrawColor(224, 224, 224);
-                pdf.rect(margin, cardStartY, contentWidth, y - cardStartY, 'S');
-                y += 10;
+                pdf.rect(margin, cardStartY, contentWidth, y - cardStartY - 5, 'S');
+                y += 5;
             }
         }
-
+        
         // --- STATISTICS ---
+        pdf.addPage();
+        pageNumber++;
+        addHeaderAndFooter(pageNumber);
+        y = margin + 5;
+        addTextBox('Estadísticas y Visualización', { isTitle: true, fontSize: 18 });
+        y += 5;
+
         const pieChartEl = document.getElementById('pdf-pie-chart-card');
         const barChartEl = document.getElementById('pdf-bar-chart-card');
         
         if (pieChartEl && barChartEl) {
-            pdf.addPage();
-            currentPage++;
-            addHeaderAndFooter(currentPage);
-            y = margin + 5;
-            addTextBox('Estadísticas y Visualización', { isTitle: true });
-            y += 5;
-
-            const addChart = async(element: HTMLElement, options: any) => {
-                const canvas = await html2canvas(element, { scale: 3, backgroundColor: null, useCORS: true });
-                const imgWidth = options.width;
-                const imgHeight = (canvas.height * imgWidth) / canvas.width;
-                
-                if (y + imgHeight > pdfHeight - margin) {
-                    pdf.addPage(); currentPage++; addHeaderAndFooter(currentPage); y = margin + 5;
-                }
-                pdf.addImage(canvas.toDataURL('image/png', 1.0), 'PNG', options.x, y, imgWidth, imgHeight);
-                return imgHeight;
-            };
-            
-            const chartWidth = contentWidth / 2 - 5;
-            const pieHeight = await addChart(pieChartEl, { width: chartWidth, x: margin });
-            const barHeight = await addChart(barChartEl, { width: chartWidth, x: margin + chartWidth + 10 });
-
-            y += Math.max(pieHeight, barHeight) + 10;
+          const addChart = async (element, options) => {
+              const canvas = await html2canvas(element, { scale: 3, backgroundColor: null, useCORS: true });
+              const imgData = canvas.toDataURL('image/png', 1.0);
+              const imgWidth = options.width;
+              const imgHeight = (canvas.height * imgWidth) / canvas.width;
+              
+              if (y + imgHeight > pdf.internal.pageSize.getHeight() - margin) {
+                  pdf.addPage(); pageNumber++; addHeaderAndFooter(pageNumber); y = margin + 5;
+              }
+              pdf.addImage(imgData, 'PNG', options.x, y, imgWidth, imgHeight);
+              return imgHeight;
+          };
+          
+          const chartWidth = contentWidth / 2 - 5;
+          const pieHeight = await addChart(pieChartEl, { width: chartWidth, x: margin });
+          await addChart(barChartEl, { width: chartWidth, x: margin + chartWidth + 10 });
         }
 
         pdf.save(`reporte-fallos-${format(new Date(), 'yyyy-MM-dd')}.pdf`);
-      } catch (error) {
+    } catch (error) {
         console.error("Error generating PDF:", error);
         toast({ title: "Error de PDF", description: "No se pudo generar el archivo PDF.", variant: "destructive" });
-      } finally {
-        if(reportContainer && reportContainer.parentNode) {
-            document.body.removeChild(reportContainer);
-        }
+    } finally {
         setIsDownloadingPdf(false);
-      }
-    }, 50);
-  }
+    }
+  };
 
   const resetDialog = () => {
     setImpactAnalysis(null);

@@ -526,6 +526,7 @@ const InfoField = ({ label, value, preWrap = false }) => (
 const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCase[]; stats: any }> = ({ failedCases, allCases, stats }) => {
   const [impactAnalysis, setImpactAnalysis] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [reportDescription, setReportDescription] = useState('');
   const [authorName, setAuthorName] = useState('');
   const { toast } = useToast();
@@ -554,174 +555,194 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
     }
   };
 
-  const handleDownloadPdf = async () => {
-    const reportContainer = document.createElement('div');
-    reportContainer.style.position = 'absolute';
-    reportContainer.style.left = '-9999px';
-    reportContainer.style.width = '800px';
-    document.body.appendChild(reportContainer);
-  
-    try {
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-      const margin = 15;
-      const contentWidth = pdfWidth - (margin * 2);
-  
-      // --- Helper Functions ---
-      const escapeHtml = (unsafe: string) =>
-        unsafe
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#039;");
+  const handleDownloadPdf = () => {
+    setIsDownloadingPdf(true);
 
-      const addHeaderAndFooter = (pageNumber) => {
-        pdf.setPage(pageNumber);
-        pdf.setFontSize(10);
-        pdf.setTextColor(100);
-        pdf.text('Informe de Hallazgos de QA - Detalle', margin, margin);
-        pdf.setLineWidth(0.5);
-        pdf.line(margin, margin + 3, pdfWidth - margin, margin + 3);
-        
-        pdf.setTextColor(150);
-        pdf.text(`Página ${pageNumber}`, pdfWidth - margin, pdfHeight - margin);
-      };
+    // Use a small timeout to allow the UI to update to the loading state before the heavy work starts
+    setTimeout(async () => {
+      const reportContainer = document.createElement('div');
+      reportContainer.style.position = 'absolute';
+      reportContainer.style.left = '-9999px';
+      reportContainer.style.width = '800px';
+      document.body.appendChild(reportContainer);
+    
+      try {
+        const pdf = new jsPDF('p', 'mm', 'a4');
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = pdf.internal.pageSize.getHeight();
+        const margin = 15;
+        const contentWidth = pdfWidth - (margin * 2);
+    
+        // --- Helper Functions ---
+        const escapeHtml = (unsafe: string) =>
+          unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
 
-      let currentPage = 1;
-      let y = margin + 10;
+        const addHeaderAndFooter = (pageNumber) => {
+          pdf.setPage(pageNumber);
+          pdf.setFontSize(10);
+          pdf.setTextColor(100);
+          pdf.text('Informe de Hallazgos de QA - Detalle', margin, margin);
+          pdf.setLineWidth(0.5);
+          pdf.line(margin, margin + 3, pdfWidth - margin, margin + 3);
+          
+          pdf.setTextColor(150);
+          pdf.text(`Página ${pageNumber}`, pdfWidth - margin, pdfHeight - margin);
+        };
 
-      const addElement = async (element) => {
-          if (!element) return;
-          const canvas = await html2canvas(element, { scale: 2, useCORS: true, logging: false });
-          const imgHeight = (canvas.height * contentWidth) / canvas.width;
+        let currentPage = 1;
+        let y = margin + 10;
 
-          if (y + imgHeight > pdfHeight - margin) {
-              pdf.addPage();
-              currentPage++;
-              addHeaderAndFooter(currentPage);
-              y = margin + 10;
-          }
-          pdf.addImage(canvas.toDataURL("image/png"), "PNG", margin, y, contentWidth, imgHeight);
-          y += imgHeight + 5;
-      };
+        const addElement = async (element) => {
+            if (!element) return;
+            const canvas = await html2canvas(element, { scale: 2, useCORS: true, logging: false });
+            const imgHeight = (canvas.height * contentWidth) / canvas.width;
 
-      // --- 1. COVER PAGE ---
-      const currentDate = new Date();
-      const formattedDate = format(currentDate, 'dd / MM / yyyy');
-      const evaluatedPeriod = format(currentDate, 'MMMM yyyy', { locale: es });
-      const capitalizedPeriod = evaluatedPeriod.charAt(0).toUpperCase() + evaluatedPeriod.slice(1);
-      const uniqueProcesses = [...new Set(allCases.map(tc => tc.proceso).filter(Boolean))];
-  
-      const coverHtml = `
-        <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #333; background-color: white; display: flex; flex-direction: column; height: 1123px; padding: 60px; box-sizing: border-box; border: 1px solid #eee;">
-          <div style="text-align: center; margin-bottom: 40px;">
-            <h1 style="font-size: 32px; color: #5D54A4; margin: 0; font-weight: 600;">Informe de Hallazgos de QA</h1>
-            <p style="font-size: 16px; color: #777; margin-top: 5px;">TESTWARE</p>
-          </div>
-          <div style="margin-top: 50px; font-size: 14px; border-top: 1px solid #eee; border-bottom: 1px solid #eee; padding: 20px 0;">
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr>
-                <td style="padding: 8px 10px; width: 50%;"><strong>Elaborado por:</strong> ${escapeHtml(authorName)}</td>
-                <td style="padding: 8px 10px; width: 50%;"><strong>Fecha:</strong> ${formattedDate}</td>
-              </tr>
-              <tr><td style="padding: 8px 10px;" colspan="2"><strong>Período Evaluado:</strong> ${capitalizedPeriod}</td></tr>
-            </table>
-          </div>
-          <div style="margin-top: 40px;">
-            <h2 style="font-size: 18px; border-bottom: 1px solid #ddd; padding-bottom: 8px; color: #444; font-weight: 600;">Procesos Evaluados</h2>
-            <ul style="padding-left: 20px; list-style-type: disc; color: #555; line-height: 1.8;">${uniqueProcesses.map(p => `<li>${escapeHtml(p)}</li>`).join('')}</ul>
-          </div>
-          <div style="margin-top: 40px; flex-grow: 1;">
-            <h2 style="font-size: 18px; border-bottom: 1px solid #ddd; padding-bottom: 8px; color: #444; font-weight: 600;">Resumen del Reporte</h2>
-            <p style="font-size: 14px; line-height: 1.6; color: #555; white-space: pre-wrap;">${escapeHtml(reportDescription)}</p>
-          </div>
-          <div style="text-align: center; font-size: 12px; color: #aaa; margin-top: auto; padding-top: 20px;"><p>TESTWARE - Reporte Confidencial</p></div>
-        </div>`;
-      
-      reportContainer.innerHTML = coverHtml;
-      const coverCanvas = await html2canvas(reportContainer.firstElementChild, { scale: 2, useCORS: true });
-      pdf.addImage(coverCanvas.toDataURL('image/png'), 'PNG', 0, 0, pdfWidth, pdfHeight);
-  
-      // --- 2. IMPACT ANALYSIS PAGE ---
-      if (impactAnalysis) {
-        pdf.addPage();
-        currentPage++;
-        addHeaderAndFooter(currentPage);
-        y = margin + 10;
-        
-        const analysisHtml = `
-          <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; width: 100%;">
-            <h2 style="font-size: 24px; color: #5D54A4; border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-bottom: 20px; font-weight: 600;">Análisis de Impacto General</h2>
-            <div style="background: #f0f4ff; border-left: 4px solid #5D54A4; padding: 20px; border-radius: 5px;">
-                <pre style="white-space: pre-wrap; font-family: inherit; font-size: 14px; line-height: 1.6; color: #333; margin: 0;">${escapeHtml(impactAnalysis)}</pre>
+            if (y + imgHeight > pdfHeight - margin - 5) { // Added a small buffer
+                pdf.addPage();
+                currentPage++;
+                addHeaderAndFooter(currentPage);
+                y = margin + 10;
+            }
+            pdf.addImage(canvas.toDataURL("image/png"), "PNG", margin, y, contentWidth, imgHeight);
+            y += imgHeight + 5;
+        };
+
+        // --- 1. COVER PAGE ---
+        const currentDate = new Date();
+        const formattedDate = format(currentDate, 'dd / MM / yyyy');
+        const evaluatedPeriod = format(currentDate, 'MMMM yyyy', { locale: es });
+        const capitalizedPeriod = evaluatedPeriod.charAt(0).toUpperCase() + evaluatedPeriod.slice(1);
+        const uniqueProcesses = [...new Set(allCases.map(tc => tc.proceso).filter(Boolean))];
+    
+        const coverHtml = `
+          <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #333; background-color: white; display: flex; flex-direction: column; height: 1123px; padding: 60px; box-sizing: border-box; border: 1px solid #eee;">
+            <div style="text-align: center; margin-bottom: 40px;">
+              <h1 style="font-size: 32px; color: #5D54A4; margin: 0; font-weight: 600;">Informe de Hallazgos de QA</h1>
+              <p style="font-size: 16px; color: #777; margin-top: 5px;">TESTWARE</p>
             </div>
+            <div style="margin-top: 50px; font-size: 14px; border-top: 1px solid #eee; border-bottom: 1px solid #eee; padding: 20px 0;">
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 8px 10px; width: 50%;"><strong>Elaborado por:</strong> ${escapeHtml(authorName)}</td>
+                  <td style="padding: 8px 10px; width: 50%;"><strong>Fecha:</strong> ${formattedDate}</td>
+                </tr>
+                <tr><td style="padding: 8px 10px;" colspan="2"><strong>Período Evaluado:</strong> ${capitalizedPeriod}</td></tr>
+              </table>
+            </div>
+            <div style="margin-top: 40px; flex-grow: 1;">
+              <h2 style="font-size: 18px; border-bottom: 1px solid #ddd; padding-bottom: 8px; color: #444; font-weight: 600;">Procesos Evaluados</h2>
+              <ul style="padding-left: 20px; list-style-type: disc; color: #555; line-height: 1.8;">${uniqueProcesses.map(p => `<li>${escapeHtml(p)}</li>`).join('')}</ul>
+            </div>
+            <div style="text-align: center; font-size: 12px; color: #aaa; margin-top: auto; padding-top: 20px;"><p>TESTWARE - Reporte Confidencial</p></div>
           </div>`;
-        reportContainer.innerHTML = analysisHtml;
-        await addElement(reportContainer.firstElementChild);
-      }
-  
-      // --- 3. FAILED CASES PAGES ---
-      if (failedCases.length > 0) {
-        pdf.addPage();
-        currentPage++;
-        addHeaderAndFooter(currentPage);
-        y = margin + 10;
-
-        const detailTitleHtml = `<h2 style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 24px; color: #5D54A4; border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-bottom: 10px; font-weight: 600;">Detalle de Casos de Prueba Fallidos</h2>`;
-        reportContainer.innerHTML = detailTitleHtml;
-        await addElement(reportContainer.firstElementChild);
-
-        for (const tc of failedCases) {
-          const caseHtml = `
-            <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; border: 1px solid #e0e0e0; border-radius: 8px; margin-top: 15px; padding: 20px; background-color: #fcfcfc; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-              <h3 style="font-size: 16px; font-weight: bold; color: #333; margin-top:0;">CASO: ${escapeHtml(tc.casoPrueba)} &mdash; <span style="font-weight: normal;">${escapeHtml(tc.proceso)}</span></h3>
-              <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;" />
-              <p style="margin: 10px 0;font-size:14px;"><strong>Descripción:</strong> ${escapeHtml(tc.descripcion)}</p>
-              <p style="margin: 10px 0;font-size:14px;"><strong>Paso a Paso:</strong></p>
-              <pre style="white-space: pre-wrap; font-family: 'Courier New', Courier, monospace; background: #f5f5f5; padding: 10px; border-radius: 5px; word-wrap: break-word; font-size: 12px; border: 1px solid #eee;">${escapeHtml(tc.pasoAPaso)}</pre>
-              <p style="margin: 10px 0;font-size:14px;"><strong>Datos de Prueba:</strong> ${escapeHtml(tc.datosPrueba)}</p>
-              <p style="margin: 10px 0;font-size:14px;"><strong>Resultado Esperado:</strong> ${escapeHtml(tc.resultadoEsperado)}</p>
-              <p style="margin: 10px 0;font-size:14px;"><strong>Comentarios de QA:</strong> <span style="color: #c0392b;">${escapeHtml(tc.comentarios)}</span></p>
-              <p style="margin: 10px 0;font-size:14px;"><strong>Evidencia:</strong></p>
-              ${
-                tc.evidencia.startsWith('data:image')
-                ? `<img src="${tc.evidencia}" style="max-width: 90%; border: 1px solid #ddd; border-radius: 5px; margin-top: 10px;" alt="Evidencia"/>`
-                : `<a href="${tc.evidencia}" target="_blank" style="color: #2980b9; word-break: break-all;">${escapeHtml(tc.evidencia)}</a>`
-              }
+        
+        reportContainer.innerHTML = coverHtml;
+        const coverCanvas = await html2canvas(reportContainer.firstElementChild, { scale: 2, useCORS: true });
+        pdf.addImage(coverCanvas.toDataURL('image/png'), 'PNG', 0, 0, pdfWidth, pdfHeight);
+    
+        // --- 2. REPORT SUMMARY PAGE ---
+        if (reportDescription) {
+            pdf.addPage();
+            currentPage++;
+            addHeaderAndFooter(currentPage);
+            y = margin + 10;
+            
+            const summaryHtml = `
+            <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; width: 100%;">
+                <h2 style="font-size: 24px; color: #5D54A4; border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-bottom: 20px; font-weight: 600;">Resumen del Reporte</h2>
+                <div style="background: #f9f9f9; border-left: 4px solid #aaa; padding: 20px; border-radius: 5px;">
+                    <pre style="white-space: pre-wrap; font-family: inherit; font-size: 14px; line-height: 1.6; color: #333; margin: 0;">${escapeHtml(reportDescription)}</pre>
+                </div>
             </div>`;
-          reportContainer.innerHTML = caseHtml;
-          await addElement(reportContainer.firstElementChild);
+            reportContainer.innerHTML = summaryHtml;
+            await addElement(reportContainer.firstElementChild);
         }
-      }
 
-      // --- 4. STATS PAGE ---
-      const pieChartEl = document.getElementById('pdf-pie-chart-card');
-      const barChartEl = document.getElementById('pdf-bar-chart-card');
-      
-      if (pieChartEl && barChartEl) {
+        // --- 3. IMPACT ANALYSIS PAGE ---
+        if (impactAnalysis) {
           pdf.addPage();
           currentPage++;
           addHeaderAndFooter(currentPage);
           y = margin + 10;
           
-          const statsTitleHtml = `<h2 style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 24px; color: #5D54A4; border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-bottom: 20px; font-weight: 600;">Estadísticas y Visualización</h2>`;
-          reportContainer.innerHTML = statsTitleHtml;
+          const analysisHtml = `
+            <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; width: 100%;">
+              <h2 style="font-size: 24px; color: #5D54A4; border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-bottom: 20px; font-weight: 600;">Análisis de Impacto General</h2>
+              <div style="background: #f0f4ff; border-left: 4px solid #5D54A4; padding: 20px; border-radius: 5px;">
+                  <pre style="white-space: pre-wrap; font-family: inherit; font-size: 14px; line-height: 1.6; color: #333; margin: 0;">${escapeHtml(impactAnalysis)}</pre>
+              </div>
+            </div>`;
+          reportContainer.innerHTML = analysisHtml;
           await addElement(reportContainer.firstElementChild);
-          
-          await addElement(pieChartEl);
-          await addElement(barChartEl);
+        }
+    
+        // --- 4. FAILED CASES PAGES ---
+        if (failedCases.length > 0) {
+          pdf.addPage();
+          currentPage++;
+          addHeaderAndFooter(currentPage);
+          y = margin + 10;
+
+          const detailTitleHtml = `<h2 style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 24px; color: #5D54A4; border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-bottom: 10px; font-weight: 600;">Detalle de Casos de Prueba Fallidos</h2>`;
+          reportContainer.innerHTML = detailTitleHtml;
+          await addElement(reportContainer.firstElementChild);
+
+          for (const tc of failedCases) {
+            const caseHtml = `
+              <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; border: 1px solid #e0e0e0; border-radius: 8px; margin-top: 15px; padding: 20px; background-color: #fcfcfc; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                <h3 style="font-size: 16px; font-weight: bold; color: #333; margin-top:0;">CASO: ${escapeHtml(tc.casoPrueba)} &mdash; <span style="font-weight: normal;">${escapeHtml(tc.proceso)}</span></h3>
+                <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;" />
+                <p style="margin: 10px 0;font-size:14px;"><strong>Descripción:</strong> ${escapeHtml(tc.descripcion)}</p>
+                <p style="margin: 10px 0;font-size:14px;"><strong>Paso a Paso:</strong></p>
+                <pre style="white-space: pre-wrap; font-family: 'Courier New', Courier, monospace; background: #f5f5f5; padding: 10px; border-radius: 5px; word-wrap: break-word; font-size: 12px; border: 1px solid #eee;">${escapeHtml(tc.pasoAPaso)}</pre>
+                <p style="margin: 10px 0;font-size:14px;"><strong>Datos de Prueba:</strong> ${escapeHtml(tc.datosPrueba)}</p>
+                <p style="margin: 10px 0;font-size:14px;"><strong>Resultado Esperado:</strong> ${escapeHtml(tc.resultadoEsperado)}</p>
+                <p style="margin: 10px 0;font-size:14px;"><strong>Comentarios de QA:</strong> <span style="color: #c0392b;">${escapeHtml(tc.comentarios)}</span></p>
+                <p style="margin: 10px 0;font-size:14px;"><strong>Evidencia:</strong></p>
+                ${
+                  tc.evidencia.startsWith('data:image')
+                  ? `<img src="${tc.evidencia}" style="max-width: 90%; border: 1px solid #ddd; border-radius: 5px; margin-top: 10px;" alt="Evidencia"/>`
+                  : `<a href="${tc.evidencia}" target="_blank" style="color: #2980b9; word-break: break-all;">${escapeHtml(tc.evidencia)}</a>`
+                }
+              </div>`;
+            reportContainer.innerHTML = caseHtml;
+            await addElement(reportContainer.firstElementChild);
+          }
+        }
+
+        // --- 5. STATS PAGE ---
+        const pieChartEl = document.getElementById('pdf-pie-chart-card');
+        const barChartEl = document.getElementById('pdf-bar-chart-card');
+        
+        if (pieChartEl && barChartEl) {
+            pdf.addPage();
+            currentPage++;
+            addHeaderAndFooter(currentPage);
+            y = margin + 10;
+            
+            const statsTitleHtml = `<h2 style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 24px; color: #5D54A4; border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-bottom: 20px; font-weight: 600;">Estadísticas y Visualización</h2>`;
+            reportContainer.innerHTML = statsTitleHtml;
+            await addElement(reportContainer.firstElementChild);
+            
+            await addElement(pieChartEl);
+            await addElement(barChartEl);
+        }
+    
+        // --- 6. SAVE PDF ---
+        pdf.save(`reporte-fallos-${format(new Date(), 'yyyy-MM-dd')}.pdf`);
+      } catch (error) {
+        console.error("Error generating PDF:", error);
+        toast({ title: "Error de PDF", description: "No se pudo generar el archivo PDF.", variant: "destructive" });
+      } finally {
+        document.body.removeChild(reportContainer);
+        setIsDownloadingPdf(false);
       }
-  
-      // --- 5. SAVE PDF ---
-      pdf.save(`reporte-fallos-${format(new Date(), 'yyyy-MM-dd')}.pdf`);
-    } catch (error) {
-      console.error("Error generating PDF:", error);
-      toast({ title: "Error de PDF", description: "No se pudo generar el archivo PDF.", variant: "destructive" });
-    } finally {
-      document.body.removeChild(reportContainer);
-    }
+    }, 50);
   }
 
   const resetDialog = () => {
@@ -729,6 +750,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
     setReportDescription('');
     setAuthorName('');
     setIsLoading(false);
+    setIsDownloadingPdf(false);
   }
 
   return (
@@ -788,7 +810,19 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
               <DialogClose asChild>
                 <Button variant="secondary">Cerrar</Button>
               </DialogClose>
-              <Button onClick={handleDownloadPdf}><Download /> Descargar PDF</Button>
+              <Button onClick={handleDownloadPdf} disabled={isDownloadingPdf}>
+                {isDownloadingPdf ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Descargando...
+                  </>
+                ) : (
+                  <>
+                    <Download className="mr-2 h-4 w-4" />
+                    Descargar PDF
+                  </>
+                )}
+              </Button>
             </DialogFooter>
           </>
         )}

@@ -144,29 +144,29 @@ const TestwareDashboard: React.FC = () => {
   };
   
   const handleUpdate = useCallback((id: string, field: keyof TestCase, value: string | TestCaseStatus) => {
-    const testCase = testCases.find(tc => tc.id === id);
-    if (!testCase) return;
-
-    if (field === 'estado' && value === 'Failed') {
-      if (!testCase.comentarios || testCase.comentarios.trim() === '' || !testCase.evidencia || testCase.evidencia.trim() === '') {
-        toast({
-          title: "Información Requerida",
-          description: "Comentarios y Evidencia son requeridos antes de marcar un caso de prueba como Fallido.",
-          variant: "destructive",
-        });
-        return;
-      }
-    }
-
     setTestCases(prev => {
       const newTestCases = [...prev];
       const tcIndex = newTestCases.findIndex(tc => tc.id === id);
       if (tcIndex === -1) return prev; 
       
+      const testCase = newTestCases[tcIndex];
+
+      if (field === 'estado' && value === 'Failed') {
+        if (!testCase.comentarios || testCase.comentarios.trim() === '' || !testCase.evidencia || testCase.evidencia.trim() === '') {
+          toast({
+            title: "Información Requerida",
+            description: "Comentarios y Evidencia son requeridos antes de marcar un caso de prueba como Fallido.",
+            variant: "destructive",
+          });
+          // Do not update the state if validation fails
+          return prev;
+        }
+      }
+      
       newTestCases[tcIndex] = { ...newTestCases[tcIndex], [field]: value };
       return newTestCases;
     });
-  }, [testCases, toast]);
+  }, [toast]);
   
   const handleDeleteTestCase = useCallback((id: string) => {
     setTestCases(prev => prev.filter(tc => tc.id !== id));
@@ -199,7 +199,7 @@ const TestwareDashboard: React.FC = () => {
             <div className="flex items-center justify-end space-x-2">
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".json" className="hidden" id="json-upload" />
               <Button variant="outline" onClick={() => fileInputRef.current?.click()}><Upload /> Cargar JSON</Button>
-              <FailureReportDialog failedCases={testCases.filter(tc => tc.estado === 'Failed')} />
+              <FailureReportDialog failedCases={testCases.filter(tc => tc.estado === 'Failed')} allCases={testCases} />
               <Button variant="destructive" onClick={handleClearData} disabled={!testCases.length}><Trash2 /> Limpiar Todo</Button>
             </div>
           </div>
@@ -524,7 +524,7 @@ const InfoField = ({ label, value, preWrap = false }) => (
   </div>
 );
 
-const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCases }) => {
+const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCase[] }> = ({ failedCases, allCases }) => {
   const [impactAnalysis, setImpactAnalysis] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [reportDescription, setReportDescription] = useState('');
@@ -559,13 +559,14 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
     reportElement.style.position = 'absolute';
     reportElement.style.left = '-9999px';
     reportElement.style.top = '0';
+    reportElement.style.width = '800px';
 
     const currentDate = new Date();
     const formattedDate = format(currentDate, 'dd / MM / yyyy');
     const evaluatedPeriod = format(currentDate, 'MMMM yyyy', { locale: es });
     const capitalizedPeriod = evaluatedPeriod.charAt(0).toUpperCase() + evaluatedPeriod.slice(1);
 
-    const uniqueProcesses = [...new Set(failedCases.map(tc => tc.proceso))];
+    const uniqueProcesses = [...new Set(allCases.map(tc => tc.proceso).filter(Boolean))];
 
     const escapeHtml = (unsafe: string) =>
       unsafe
@@ -575,43 +576,78 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
          .replace(/"/g, "&quot;")
          .replace(/'/g, "&#039;");
 
-    let innerHTML = `
-      <div style="font-family: Arial, sans-serif; color: #333; padding: 40px; width: 800px; background-color: white;">
-        <h1 style="font-size: 24px; border-bottom: 2px solid #ccc; padding-bottom: 8px; margin-bottom: 20px;">Informe de Hallazgos de QA</h1>
-        <p><strong>Elaborado por:</strong> ${escapeHtml(authorName)}</p>
-        <p><strong>Fecha:</strong> ${formattedDate}</p>
-        <p><strong>Período Evaluado:</strong> ${capitalizedPeriod}</p>
+    const reportHtml = `
+      <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #333; background-color: white;">
         
-        <h2 style="font-size: 20px; margin-top: 30px; border-bottom: 1px solid #eee; padding-bottom: 5px;">Procesos Evaluados:</h2>
-        <ul style="padding-left: 20px;">${uniqueProcesses.map(p => `<li>${escapeHtml(p)}</li>`).join('')}</ul>
-
-        <h2 style="font-size: 20px; margin-top: 30px; border-bottom: 1px solid #eee; padding-bottom: 5px;">Resumen del Reporte</h2>
-        <p>${escapeHtml(reportDescription)}</p>
-
-        <h2 style="font-size: 20px; margin-top: 30px; border-bottom: 1px solid #eee; padding-bottom: 5px;">Detalle de Casos de Prueba Fallidos</h2>
-        ${failedCases.map(tc => `
-          <div style="page-break-inside: avoid; border-top: 1px solid #eee; margin-top: 20px; padding-top: 20px;">
-            <h3 style="font-size: 16px; font-weight: bold;">CASO: ${escapeHtml(tc.casoPrueba)} - ${escapeHtml(tc.proceso)}</h3>
-            <p><strong>Descripción:</strong> ${escapeHtml(tc.descripcion)}</p>
-            <p><strong>Paso a Paso:</strong></p>
-            <pre style="white-space: pre-wrap; font-family: 'Courier New', Courier, monospace; background: #f5f5f5; padding: 10px; border-radius: 5px; word-wrap: break-word;">${escapeHtml(tc.pasoAPaso)}</pre>
-            <p><strong>Datos de Prueba:</strong> ${escapeHtml(tc.datosPrueba)}</p>
-            <p><strong>Resultado Esperado:</strong> ${escapeHtml(tc.resultadoEsperado)}</p>
-            <p><strong>Comentarios de QA:</strong> ${escapeHtml(tc.comentarios)}</p>
-            <p><strong>Evidencia:</strong></p>
-            ${
-              tc.evidencia.startsWith('data:image')
-              ? `<img src="${tc.evidencia}" style="max-width: 100%; border: 1px solid #ddd; border-radius: 5px;" alt="Evidencia"/>`
-              : `<a href="${tc.evidencia}" target="_blank">${escapeHtml(tc.evidencia)}</a>`
-            }
+        <!-- PAGE 1: COVER -->
+        <div style="display: flex; flex-direction: column; min-height: 1123px; padding: 60px; box-sizing: border-box; border: 1px solid #eee;">
+          <div style="text-align: center; margin-bottom: 40px;">
+            <h1 style="font-size: 32px; color: #5D54A4; margin: 0; font-weight: 600;">Informe de Hallazgos de QA</h1>
+            <p style="font-size: 16px; color: #777; margin-top: 5px;">TESTWARE</p>
           </div>
-        `).join('')}
+          
+          <div style="margin-top: 50px; font-size: 14px; border-top: 1px solid #eee; border-bottom: 1px solid #eee; padding: 20px 0;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 8px 10px; width: 50%;"><strong>Elaborado por:</strong> ${escapeHtml(authorName)}</td>
+                <td style="padding: 8px 10px; width: 50%;"><strong>Fecha:</strong> ${formattedDate}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 10px;" colspan="2"><strong>Período Evaluado:</strong> ${capitalizedPeriod}</td>
+              </tr>
+            </table>
+          </div>
 
-        <h2 style="font-size: 20px; margin-top: 30px; border-bottom: 1px solid #eee; padding-bottom: 5px;">Análisis de Impacto General</h2>
-        <pre style="white-space: pre-wrap; font-family: 'Courier New', Courier, monospace; background: #f5f5f5; padding: 10px; border-radius: 5px; word-wrap: break-word;">${escapeHtml(impactAnalysis || '')}</pre>
+          <div style="margin-top: 40px;">
+            <h2 style="font-size: 18px; border-bottom: 1px solid #ddd; padding-bottom: 8px; color: #444; font-weight: 600;">Procesos Evaluados</h2>
+            <ul style="padding-left: 20px; list-style-type: disc; color: #555; line-height: 1.8;">${uniqueProcesses.map(p => `<li>${escapeHtml(p)}</li>`).join('')}</ul>
+          </div>
+          
+          <div style="margin-top: 40px; flex-grow: 1;">
+            <h2 style="font-size: 18px; border-bottom: 1px solid #ddd; padding-bottom: 8px; color: #444; font-weight: 600;">Resumen del Reporte</h2>
+            <p style="font-size: 14px; line-height: 1.6; color: #555; white-space: pre-wrap;">${escapeHtml(reportDescription)}</p>
+          </div>
+          
+          <div style="text-align: center; font-size: 12px; color: #aaa; margin-top: auto; padding-top: 20px;">
+            <p>TESTWARE - Reporte Confidencial</p>
+          </div>
+        </div>
+
+        <!-- CONTENT PAGES -->
+        <div style="padding: 40px; box-sizing: border-box;">
+            <h2 style="font-size: 24px; color: #5D54A4; border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-bottom: 20px; font-weight: 600;">Detalle de Casos de Prueba Fallidos</h2>
+            ${failedCases.map(tc => `
+              <div style="page-break-inside: avoid; border: 1px solid #e0e0e0; border-radius: 8px; margin-top: 20px; padding: 20px; background-color: #fcfcfc; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                <h3 style="font-size: 16px; font-weight: bold; color: #333; margin-top:0;">CASO: ${escapeHtml(tc.casoPrueba)} &mdash; <span style="font-weight: normal;">${escapeHtml(tc.proceso)}</span></h3>
+                <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;" />
+                
+                <p style="margin: 10px 0;"><strong>Descripción:</strong> ${escapeHtml(tc.descripcion)}</p>
+                
+                <p style="margin: 10px 0;"><strong>Paso a Paso:</strong></p>
+                <pre style="white-space: pre-wrap; font-family: 'Courier New', Courier, monospace; background: #f5f5f5; padding: 10px; border-radius: 5px; word-wrap: break-word; font-size: 12px; border: 1px solid #eee;">${escapeHtml(tc.pasoAPaso)}</pre>
+                
+                <p style="margin: 10px 0;"><strong>Datos de Prueba:</strong> ${escapeHtml(tc.datosPrueba)}</p>
+                <p style="margin: 10px 0;"><strong>Resultado Esperado:</strong> ${escapeHtml(tc.resultadoEsperado)}</p>
+                <p style="margin: 10px 0;"><strong>Comentarios de QA:</strong> <span style="color: #c0392b;">${escapeHtml(tc.comentarios)}</span></p>
+                
+                <p style="margin: 10px 0;"><strong>Evidencia:</strong></p>
+                ${
+                  tc.evidencia.startsWith('data:image')
+                  ? `<img src="${tc.evidencia}" style="max-width: 90%; border: 1px solid #ddd; border-radius: 5px; margin-top: 10px;" alt="Evidencia"/>`
+                  : `<a href="${tc.evidencia}" target="_blank" style="color: #2980b9; word-break: break-all;">${escapeHtml(tc.evidencia)}</a>`
+                }
+              </div>
+            `).join('')}
+
+            <h2 style="font-size: 24px; color: #5D54A4; border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-top: 40px; margin-bottom: 20px; font-weight: 600; page-break-before: always;">Análisis de Impacto General</h2>
+            <div style="background: #f0f4ff; border-left: 4px solid #5D54A4; padding: 20px; border-radius: 5px;">
+              <pre style="white-space: pre-wrap; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #333; margin: 0;">${escapeHtml(impactAnalysis || '')}</pre>
+            </div>
+        </div>
       </div>
     `;
-    reportElement.innerHTML = innerHTML;
+
+    reportElement.innerHTML = reportHtml;
     document.body.appendChild(reportElement);
 
     try {
@@ -628,15 +664,32 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
 
       let heightLeft = scaledHeight;
       let position = 0;
-
+      let pageNum = 1;
+      
       pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, scaledHeight);
       heightLeft -= pageHeight;
 
       while (heightLeft > 0) {
-        position = -heightLeft;
+        position -= pageHeight;
         pdf.addPage();
         pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, scaledHeight);
         heightLeft -= pageHeight;
+        pageNum++;
+      }
+      
+      for (let i = 1; i <= pageNum; i++) {
+        pdf.setPage(i);
+        // Add header and footer to content pages
+        if (i > 1) {
+            pdf.setFontSize(10);
+            pdf.setTextColor(100);
+            pdf.text('Informe de Hallazgos de QA - Detalle', 15, 15);
+            pdf.setLineWidth(0.5);
+            pdf.line(15, 18, pdfWidth - 15, 18);
+            
+            pdf.setTextColor(150);
+            pdf.text(`Página ${i}`, pdfWidth - 25, pageHeight - 10);
+        }
       }
       
       pdf.save(`reporte-fallos-${format(new Date(), 'yyyy-MM-dd')}.pdf`);

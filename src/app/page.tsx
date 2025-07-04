@@ -1,9 +1,25 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useRef, useCallback, memo, type ChangeEvent } from 'react';
+import {
+  Bar,
+  BarChart,
+  Cell,
+  Pie,
+  PieChart as RechartsPieChart,
+  XAxis,
+  YAxis,
+} from "recharts";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart"
+import type { ChartConfig } from "@/components/ui/chart";
+
 import { AITestCase, TestCase, TestCaseStatus } from '@/lib/types';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -11,7 +27,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { useToast } from "@/hooks/use-toast";
 import { generateReportAction } from '@/app/actions';
-import { Upload, Download, Trash2, FileText, Loader2, Bug, Search, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter } from 'lucide-react';
+import { Upload, Download, Trash2, FileText, Loader2, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter, PieChart as PieChartIcon } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
@@ -30,6 +46,29 @@ const statusIcons: Record<TestCaseStatus, React.ReactNode> = {
   'N/A': <FileQuestion className="h-5 w-5 text-gray-500" />,
   'pending': <Hourglass className="h-5 w-5 text-yellow-500" />,
 }
+
+const TestwareLogo = ({ className }: { className?: string }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <circle cx="10.5" cy="10.5" r="7.5" />
+    <line x1="16" y1="16" x2="21" y2="21" />
+    <path d="M10.5 13a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" />
+    <line x1="10.5" y1="11.5" x2="10.5" y2="8" />
+    <line x1="8.5" y1="14" l1="8" y1="14.5" x2="7" y2="14" />
+    <line x1="12.5" y1="14" l1="13" y1="14.5" x2="14" y2="14" />
+    <line x1="8" y1="9" x2="7" y2="8.5" />
+    <line x1="13" y1="9" x2="14" y2="8.5" />
+  </svg>
+);
+
 
 const TestwareDashboard: React.FC = () => {
   const [testCases, setTestCases] = useState<TestCase[]>([]);
@@ -151,10 +190,7 @@ const TestwareDashboard: React.FC = () => {
         <header className="sticky top-0 z-10 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="container flex h-16 items-center justify-between">
             <div className="flex gap-2 items-center">
-              <div className="flex items-center">
-                  <Bug className="h-6 w-6 text-primary" />
-                  <Search className="h-5 w-5 -ml-2 text-primary" />
-              </div>
+              <TestwareLogo className="h-8 w-8 text-primary" />
               <h1 className="text-2xl font-bold tracking-tight font-headline">TESTWARE</h1>
             </div>
             <div className="flex items-center justify-end space-x-2">
@@ -191,61 +227,154 @@ const TestwareDashboard: React.FC = () => {
   );
 };
 
-const Sidebar = ({ stats, processes, filterProcess, setFilterProcess, filterStatus, setFilterStatus }) => (
-  <aside className="w-80 bg-card border-r p-6 space-y-8 sticky top-0 h-screen overflow-y-auto">
-    <div>
-        <h2 className="text-lg font-semibold tracking-tight">Panel de Control</h2>
-        <div className="mt-4 space-y-2">
-          <p className="text-sm text-muted-foreground">{stats.completed}/{stats.total} casos completados ({stats.progress}%)</p>
-          <div className="w-full bg-muted rounded-full h-2.5">
-            <div className="bg-primary h-2.5 rounded-full" style={{ width: `${stats.progress}%` }}></div>
+const Sidebar = ({ stats, processes, filterProcess, setFilterProcess, filterStatus, setFilterStatus }) => {
+    const chartData = useMemo(() => [
+        { name: 'Aprobados', value: stats.passed, fill: 'hsl(var(--chart-1))' },
+        { name: 'Fallidos', value: stats.failed, fill: 'hsl(var(--chart-2))' },
+        { name: 'N/A', value: stats.na, fill: 'hsl(var(--chart-3))' },
+        { name: 'Pendientes', value: stats.pending, fill: 'hsl(var(--chart-4))' },
+    ], [stats]);
+
+    const chartConfig = {
+      value: {
+        label: 'Casos',
+      },
+      Aprobados: {
+        label: 'Aprobados',
+        color: 'hsl(var(--chart-1))',
+      },
+      Fallidos: {
+        label: 'Fallidos',
+        color: 'hsl(var(--chart-2))',
+      },
+      'N/A': {
+        label: 'N/A',
+        color: 'hsl(var(--chart-3))',
+      },
+      Pendientes: {
+        label: 'Pendientes',
+        color: 'hsl(var(--chart-4))',
+      },
+    } satisfies ChartConfig
+
+    return (
+      <aside className="w-80 bg-card border-r p-6 space-y-8 sticky top-0 h-screen overflow-y-auto">
+        <div>
+            <h2 className="text-lg font-semibold tracking-tight">Panel de Control</h2>
+            <div className="mt-4 space-y-2">
+              <p className="text-sm text-muted-foreground">{stats.completed}/{stats.total} casos completados ({stats.progress}%)</p>
+              <div className="w-full bg-muted rounded-full h-2.5">
+                <div className="bg-primary h-2.5 rounded-full" style={{ width: `${stats.progress}%` }}></div>
+              </div>
+            </div>
+        </div>
+        
+        <div>
+          <h3 className="text-md font-semibold flex items-center gap-2"><BarChart2 className="h-5 w-5"/> Estadísticas</h3>
+          <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+            <div className="p-2 bg-green-100 dark:bg-green-900/50 rounded-lg"><p className="text-xl font-bold text-green-600">{stats.passed}</p><p className="text-xs text-muted-foreground">Aprobados</p></div>
+            <div className="p-2 bg-red-100 dark:bg-red-900/50 rounded-lg"><p className="text-xl font-bold text-red-600">{stats.failed}</p><p className="text-xs text-muted-foreground">Fallidos</p></div>
+            <div className="p-2 bg-gray-100 dark:bg-gray-900/50 rounded-lg"><p className="text-xl font-bold text-gray-500">{stats.na}</p><p className="text-xs text-muted-foreground">N/A</p></div>
+          </div>
+          <div className="p-2 mt-2 bg-yellow-100 dark:bg-yellow-900/50 rounded-lg text-center"><p className="text-xl font-bold text-yellow-600">{stats.pending}</p><p className="text-xs text-muted-foreground">Pendientes</p></div>
+        </div>
+
+        <div>
+          <h3 className="text-md font-semibold flex items-center gap-2"><PieChartIcon className="h-5 w-5"/> Visualización</h3>
+          <div className="mt-4 space-y-4">
+            <Card>
+              <CardHeader className="items-center pb-0">
+                <CardTitle>Visión General</CardTitle>
+              </CardHeader>
+              <CardContent className="flex-1 pb-0">
+                <ChartContainer
+                  config={chartConfig}
+                  className="mx-auto aspect-square max-h-[250px]"
+                >
+                  <RechartsPieChart>
+                    <ChartTooltip
+                      cursor={false}
+                      content={<ChartTooltipContent hideLabel />}
+                    />
+                    <Pie
+                      data={chartData}
+                      dataKey="value"
+                      nameKey="name"
+                      innerRadius={50}
+                      strokeWidth={3}
+                    >
+                      {chartData.map((entry) => (
+                        <Cell key={`cell-${entry.name}`} fill={entry.fill} />
+                      ))}
+                    </Pie>
+                  </RechartsPieChart>
+                </ChartContainer>
+              </CardContent>
+            </Card>
+            <Card>
+                <CardHeader className="items-center pb-0">
+                    <CardTitle>Resumen por Estado</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <ChartContainer config={chartConfig} className="w-full h-[200px]">
+                        <BarChart accessibilityLayer data={chartData} layout="vertical" margin={{ left: 10, right: 10 }}>
+                            <YAxis
+                                dataKey="name"
+                                type="category"
+                                tickLine={false}
+                                tickMargin={10}
+                                axisLine={false}
+                                tickFormatter={(value) => value}
+                                width={80}
+                            />
+                            <XAxis dataKey="value" type="number" hide />
+                            <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" hideLabel />} />
+                            <Bar dataKey="value" layout="vertical" radius={5}>
+                                {chartData.map((entry) => (
+                                    <Cell key={`cell-${entry.name}`} fill={entry.fill} />
+                                ))}
+                            </Bar>
+                        </BarChart>
+                    </ChartContainer>
+                </CardContent>
+            </Card>
           </div>
         </div>
-    </div>
-    
-    <div>
-      <h3 className="text-md font-semibold flex items-center gap-2"><BarChart2 className="h-5 w-5"/> Estadísticas</h3>
-      <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-        <div className="p-2 bg-green-100 dark:bg-green-900/50 rounded-lg"><p className="text-xl font-bold text-green-600">{stats.passed}</p><p className="text-xs text-muted-foreground">Aprobados</p></div>
-        <div className="p-2 bg-red-100 dark:bg-red-900/50 rounded-lg"><p className="text-xl font-bold text-red-600">{stats.failed}</p><p className="text-xs text-muted-foreground">Fallidos</p></div>
-        <div className="p-2 bg-gray-100 dark:bg-gray-900/50 rounded-lg"><p className="text-xl font-bold text-gray-500">{stats.na}</p><p className="text-xs text-muted-foreground">N/A</p></div>
-      </div>
-       <div className="p-2 mt-2 bg-yellow-100 dark:bg-yellow-900/50 rounded-lg text-center"><p className="text-xl font-bold text-yellow-600">{stats.pending}</p><p className="text-xs text-muted-foreground">Pendientes</p></div>
-    </div>
-    
-    <div>
-      <h3 className="text-md font-semibold flex items-center gap-2"><Filter className="h-5 w-5"/> Filtros</h3>
-      <div className="mt-4 space-y-4">
+        
         <div>
-          <Label>Proceso</Label>
-          <Select value={filterProcess} onValueChange={setFilterProcess}>
-            <SelectTrigger className="w-full mt-2">
-              <SelectValue placeholder="Filtrar por proceso..." />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos los Procesos</SelectItem>
-              {processes.slice(1).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <h3 className="text-md font-semibold flex items-center gap-2"><Filter className="h-5 w-5"/> Filtros</h3>
+          <div className="mt-4 space-y-4">
+            <div>
+              <Label>Proceso</Label>
+              <Select value={filterProcess} onValueChange={setFilterProcess}>
+                <SelectTrigger className="w-full mt-2">
+                  <SelectValue placeholder="Filtrar por proceso..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los Procesos</SelectItem>
+                  {processes.slice(1).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Estado</Label>
+              <Select value={filterStatus} onValueChange={setFilterStatus}>
+                <SelectTrigger className="w-full mt-2">
+                  <SelectValue placeholder="Filtrar por estado..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los Estados</SelectItem>
+                  {Object.keys(statusMap).map(status => (
+                    <SelectItem key={status} value={status}>{statusMap[status as TestCaseStatus]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </div>
-        <div>
-          <Label>Estado</Label>
-          <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-full mt-2">
-              <SelectValue placeholder="Filtrar por estado..." />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos los Estados</SelectItem>
-              {Object.keys(statusMap).map(status => (
-                <SelectItem key={status} value={status}>{statusMap[status]}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-    </div>
-  </aside>
-);
+      </aside>
+    )
+};
 
 const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCase, onUpdate: Function, onDelete: Function }) => {
   const evidenceInputRef = useRef<HTMLInputElement>(null);
@@ -587,3 +716,5 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
 };
 
 export default TestwareDashboard;
+
+    

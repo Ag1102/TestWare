@@ -146,9 +146,9 @@ const TestwareDashboard: React.FC = () => {
   const handleUpdate = useCallback((id: string, field: keyof TestCase, value: string | TestCaseStatus) => {
     const tcIndex = testCases.findIndex(tc => tc.id === id);
     if (tcIndex === -1) return;
-
-    const testCaseToUpdate = { ...testCases[tcIndex] };
-
+  
+    const testCaseToUpdate = testCases[tcIndex];
+  
     if (field === 'estado' && value === 'Failed') {
       if (!testCaseToUpdate.comentarios?.trim() || !testCaseToUpdate.evidencia?.trim()) {
         toast({
@@ -156,16 +156,18 @@ const TestwareDashboard: React.FC = () => {
           description: "Comentarios y Evidencia son requeridos para marcar como Fallido.",
           variant: "destructive",
         });
-        return; 
+        // We return here to prevent setting the state to 'Failed'
+        // We don't update the state, so the UI will revert to its previous state.
+        return;
       }
     }
-    
-    setTestCases(prev => {
-        const newTestCases = [...prev];
-        newTestCases[tcIndex] = { ...newTestCases[tcIndex], [field]: value };
-        return newTestCases;
-    });
-}, [testCases, toast]);
+  
+    setTestCases(prev => 
+      prev.map(tc => 
+        tc.id === id ? { ...tc, [field]: value } : tc
+      )
+    );
+  }, [testCases, toast]);
   
   const handleDeleteTestCase = useCallback((id: string) => {
     setTestCases(prev => prev.filter(tc => tc.id !== id));
@@ -558,7 +560,6 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
   const handleDownloadPdf = () => {
     setIsDownloadingPdf(true);
 
-    // Use a small timeout to allow the UI to update to the loading state before the heavy work starts
     setTimeout(async () => {
       const reportContainer = document.createElement('div');
       reportContainer.style.position = 'absolute';
@@ -573,7 +574,6 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         const margin = 15;
         const contentWidth = pdfWidth - (margin * 2);
     
-        // --- Helper Functions ---
         const escapeHtml = (unsafe: string) =>
           unsafe
             .replace(/&/g, "&amp;")
@@ -599,10 +599,10 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
 
         const addElement = async (element) => {
             if (!element) return;
-            const canvas = await html2canvas(element, { scale: 2, useCORS: true, logging: false });
+            const canvas = await html2canvas(element, { scale: 1, useCORS: true, logging: false });
             const imgHeight = (canvas.height * contentWidth) / canvas.width;
 
-            if (y + imgHeight > pdfHeight - margin - 5) { // Added a small buffer
+            if (y + imgHeight > pdfHeight - margin - 5) {
                 pdf.addPage();
                 currentPage++;
                 addHeaderAndFooter(currentPage);
@@ -611,8 +611,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
             pdf.addImage(canvas.toDataURL("image/png"), "PNG", margin, y, contentWidth, imgHeight);
             y += imgHeight + 5;
         };
-
-        // --- 1. COVER PAGE ---
+        
         const currentDate = new Date();
         const formattedDate = format(currentDate, 'dd / MM / yyyy');
         const evaluatedPeriod = format(currentDate, 'MMMM yyyy', { locale: es });
@@ -642,10 +641,9 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
           </div>`;
         
         reportContainer.innerHTML = coverHtml;
-        const coverCanvas = await html2canvas(reportContainer.firstElementChild, { scale: 2, useCORS: true });
+        const coverCanvas = await html2canvas(reportContainer.firstElementChild, { scale: 1, useCORS: true });
         pdf.addImage(coverCanvas.toDataURL('image/png'), 'PNG', 0, 0, pdfWidth, pdfHeight);
     
-        // --- 2. REPORT SUMMARY PAGE ---
         if (reportDescription) {
             pdf.addPage();
             currentPage++;
@@ -655,7 +653,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
             const summaryHtml = `
             <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; width: 100%;">
                 <h2 style="font-size: 24px; color: #5D54A4; border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-bottom: 20px; font-weight: 600;">Resumen del Reporte</h2>
-                <div style="background: #f9f9f9; border-left: 4px solid #aaa; padding: 20px; border-radius: 5px;">
+                <div style="background: #f9f9f9; border-left: 4px solid #aaa; padding: 20px;">
                     <pre style="white-space: pre-wrap; font-family: inherit; font-size: 14px; line-height: 1.6; color: #333; margin: 0;">${escapeHtml(reportDescription)}</pre>
                 </div>
             </div>`;
@@ -663,7 +661,6 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
             await addElement(reportContainer.firstElementChild);
         }
 
-        // --- 3. IMPACT ANALYSIS PAGE ---
         if (impactAnalysis) {
           pdf.addPage();
           currentPage++;
@@ -673,7 +670,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
           const analysisHtml = `
             <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; width: 100%;">
               <h2 style="font-size: 24px; color: #5D54A4; border-bottom: 1px solid #ccc; padding-bottom: 10px; margin-bottom: 20px; font-weight: 600;">Análisis de Impacto General</h2>
-              <div style="background: #f0f4ff; border-left: 4px solid #5D54A4; padding: 20px; border-radius: 5px;">
+              <div style="background: #f0f4ff; border-left: 4px solid #5D54A4; padding: 20px;">
                   <pre style="white-space: pre-wrap; font-family: inherit; font-size: 14px; line-height: 1.6; color: #333; margin: 0;">${escapeHtml(impactAnalysis)}</pre>
               </div>
             </div>`;
@@ -681,7 +678,6 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
           await addElement(reportContainer.firstElementChild);
         }
     
-        // --- 4. FAILED CASES PAGES ---
         if (failedCases.length > 0) {
           pdf.addPage();
           currentPage++;
@@ -694,19 +690,19 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
 
           for (const tc of failedCases) {
             const caseHtml = `
-              <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; border: 1px solid #e0e0e0; border-radius: 8px; margin-top: 15px; padding: 20px; background-color: #fcfcfc; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+              <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; border: 1px solid #e0e0e0; margin-top: 15px; padding: 20px; background-color: #fcfcfc;">
                 <h3 style="font-size: 16px; font-weight: bold; color: #333; margin-top:0;">CASO: ${escapeHtml(tc.casoPrueba)} &mdash; <span style="font-weight: normal;">${escapeHtml(tc.proceso)}</span></h3>
                 <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;" />
                 <p style="margin: 10px 0;font-size:14px;"><strong>Descripción:</strong> ${escapeHtml(tc.descripcion)}</p>
                 <p style="margin: 10px 0;font-size:14px;"><strong>Paso a Paso:</strong></p>
-                <pre style="white-space: pre-wrap; font-family: 'Courier New', Courier, monospace; background: #f5f5f5; padding: 10px; border-radius: 5px; word-wrap: break-word; font-size: 12px; border: 1px solid #eee;">${escapeHtml(tc.pasoAPaso)}</pre>
+                <pre style="white-space: pre-wrap; font-family: 'Courier New', Courier, monospace; background: #f5f5f5; padding: 10px; word-wrap: break-word; font-size: 12px; border: 1px solid #eee;">${escapeHtml(tc.pasoAPaso)}</pre>
                 <p style="margin: 10px 0;font-size:14px;"><strong>Datos de Prueba:</strong> ${escapeHtml(tc.datosPrueba)}</p>
                 <p style="margin: 10px 0;font-size:14px;"><strong>Resultado Esperado:</strong> ${escapeHtml(tc.resultadoEsperado)}</p>
                 <p style="margin: 10px 0;font-size:14px;"><strong>Comentarios de QA:</strong> <span style="color: #c0392b;">${escapeHtml(tc.comentarios)}</span></p>
                 <p style="margin: 10px 0;font-size:14px;"><strong>Evidencia:</strong></p>
                 ${
                   tc.evidencia.startsWith('data:image')
-                  ? `<img src="${tc.evidencia}" style="max-width: 90%; border: 1px solid #ddd; border-radius: 5px; margin-top: 10px;" alt="Evidencia"/>`
+                  ? `<img src="${tc.evidencia}" style="max-width: 90%; border: 1px solid #ddd; margin-top: 10px;" alt="Evidencia"/>`
                   : `<a href="${tc.evidencia}" target="_blank" style="color: #2980b9; word-break: break-all;">${escapeHtml(tc.evidencia)}</a>`
                 }
               </div>`;
@@ -715,7 +711,6 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
           }
         }
 
-        // --- 5. STATS PAGE ---
         const pieChartEl = document.getElementById('pdf-pie-chart-card');
         const barChartEl = document.getElementById('pdf-bar-chart-card');
         
@@ -733,13 +728,12 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
             await addElement(barChartEl);
         }
     
-        // --- 6. SAVE PDF ---
         pdf.save(`reporte-fallos-${format(new Date(), 'yyyy-MM-dd')}.pdf`);
       } catch (error) {
         console.error("Error generating PDF:", error);
         toast({ title: "Error de PDF", description: "No se pudo generar el archivo PDF.", variant: "destructive" });
       } finally {
-        document.body.removeChild(reportContainer);
+        if(reportContainer) document.body.removeChild(reportContainer);
         setIsDownloadingPdf(false);
       }
     }, 50);

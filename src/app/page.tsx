@@ -112,6 +112,7 @@ const TestwareDashboard: React.FC = () => {
     }
   }, [toast]);
 
+  // Effect for initial data load
   useEffect(() => {
     const fetchTestCases = async () => {
       try {
@@ -132,6 +133,28 @@ const TestwareDashboard: React.FC = () => {
     };
     fetchTestCases();
   }, [toast]);
+
+  // Effect for polling for real-time updates
+  useEffect(() => {
+    const intervalId = setInterval(async () => {
+        try {
+            const response = await fetch('/api/test-cases');
+            const data = await response.json();
+            // Use functional update to avoid stale state and compare
+            setTestCases(currentCases => {
+                if (JSON.stringify(data) !== JSON.stringify(currentCases)) {
+                    return data; // Update state only if data is different
+                }
+                return currentCases;
+            });
+        } catch (e) {
+            // Silently ignore polling errors in the background
+            console.error("Polling error:", e)
+        }
+    }, 2000); // Poll every 2 seconds
+
+    return () => clearInterval(intervalId); // Cleanup on component unmount
+  }, []);
 
   const processes = useMemo(() => ['all', ...Array.from(new Set(testCases.map(tc => tc.proceso))).filter(Boolean)], [testCases]);
 
@@ -161,6 +184,7 @@ const TestwareDashboard: React.FC = () => {
     reader.onload = (event) => {
       try {
         const json = JSON.parse(event.target?.result as string);
+        // Use a function that works across all browsers
         const newCases = json.map((c: any) => ({
             ...c,
             id: simpleUUID(),
@@ -587,10 +611,14 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         const pdfWidth = pdf.internal.pageSize.getWidth();
         const margin = 15;
         const contentWidth = pdfWidth - (margin * 2);
-        let y = 0; // y position starts at 0
+        let y = 0;
         let pageNumber = 1;
 
-        const addHeaderAndFooter = () => {
+        const addHeaderAndFooter = (isFirstPage = false) => {
+            if (isFirstPage) {
+                y = 60; // Start content lower on the first page
+                return;
+            }
             pdf.setFontSize(10);
             pdf.setTextColor(100);
             pdf.text('Informe de Hallazgos de QA', margin, margin - 5);
@@ -618,26 +646,27 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
             pdf.setTextColor(color[0], color[1], color[2]);
         
             const lines = pdf.splitTextToSize(text || '-', contentWidth - (isSubtitle ? 4 : 0));
-            // Approximate height with line spacing
-            const textHeight = (pdf.getLineHeight(text) / pdf.internal.scaleFactor) * lines.length;
+            const textHeight = (pdf.getLineHeight() / pdf.internal.scaleFactor) * lines.length;
             
-            if (y + textHeight > pdf.internal.pageSize.getHeight() - margin - 10) { // Check with footer margin
+            if (y + textHeight > pdf.internal.pageSize.getHeight() - margin - 5) {
                 addPageWithHeader();
             }
         
             pdf.text(lines, margin + (isSubtitle ? 2 : 0), y);
-            y += textHeight + 2; // Add padding
+            y += textHeight + 2; 
         };
         
         // --- PAGE 1: COVER ---
+        addHeaderAndFooter(true); // Special handling for first page
         const currentDate = new Date();
         const formattedDate = format(currentDate, 'dd / MM / yyyy');
         const evaluatedPeriod = format(currentDate, 'MMMM yyyy', { locale: es });
         const capitalizedPeriod = evaluatedPeriod.charAt(0).toUpperCase() + evaluatedPeriod.slice(1);
         const uniqueProcesses = [...new Set(allCases.map(tc => tc.proceso).filter(Boolean))];
         
-        pdf.setFontSize(32).setFont('helvetica', 'bold').setTextColor(93, 84, 164).text('Informe de Hallazgos de QA', pdfWidth / 2, 60, { align: 'center' });
-        pdf.setFontSize(16).setFont('helvetica', 'normal').setTextColor(119, 119, 119).text('TESTWARE', pdfWidth / 2, 70, { align: 'center' });
+        pdf.setFontSize(32).setFont('helvetica', 'bold').setTextColor(93, 84, 164).text('Informe de Hallazgos de QA', pdfWidth / 2, y, { align: 'center' });
+        y += 10;
+        pdf.setFontSize(16).setFont('helvetica', 'normal').setTextColor(119, 119, 119).text('TESTWARE', pdfWidth / 2, y, { align: 'center' });
         
         y = 110;
         addTextBox(`Elaborado por: ${authorName}`, { fontSize: 12 });
@@ -668,34 +697,42 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
             y += 5;
 
             for (const tc of failedCases) {
+                const cardStartY = y;
+
+                const estimateCardHeight = () => {
+                    let height = 25; // Header + padding
+                    const fields = [tc.descripcion, tc.pasoAPaso, tc.datosPrueba, tc.resultadoEsperado, tc.comentarios, tc.evidencia];
+                    fields.forEach(f => {
+                        if (f && !f.startsWith('data:image')) {
+                            const lines = pdf.splitTextToSize(f, contentWidth - 4);
+                            height += (pdf.getLineHeight() / pdf.internal.scaleFactor) * lines.length + 8;
+                        }
+                    });
+                    if (tc.evidencia && tc.evidencia.startsWith('data:image')) {
+                        height += 60; // Approx image height
+                    }
+                    return height;
+                };
+
+                if (y + estimateCardHeight() > pdf.internal.pageSize.getHeight() - margin - 5) {
+                    addPageWithHeader();
+                    addTextBox('Detalle de Casos de Prueba Fallidos (cont.)', { isTitle: true, fontSize: 18 });
+                    y += 5;
+                }
+
+                pdf.setDrawColor(224, 224, 224);
+                pdf.setFillColor(245, 245, 245);
+                pdf.rect(margin, y - 5, contentWidth, 12, 'FD');
+                pdf.setFont('helvetica', 'bold').setFontSize(12).setTextColor(51, 51, 51);
+                pdf.text(`CASO: ${tc.casoPrueba} — ${tc.proceso}`, margin + 2, y + 2);
+                y += 13;
+                
                 const renderField = (label: string, value: string, isCode = false, color = [0,0,0]) => {
                   if (!value) return;
                   addTextBox(label, { isSubtitle: true, fontSize: 10, fontStyle: 'bold' });
                   addTextBox(value, { isCode, color, fontSize: 10 });
                 }
 
-                // Estimate card height to decide if new page is needed
-                let estimatedHeight = 20; // for header
-                const fields = [tc.descripcion, tc.pasoAPaso, tc.datosPrueba, tc.resultadoEsperado, tc.comentarios, tc.evidencia];
-                fields.forEach(f => {
-                    if (f && !f.startsWith('data:image')) {
-                        estimatedHeight += (pdf.splitTextToSize(f, contentWidth - 4).length * 5) + 8;
-                    }
-                });
-                if (tc.evidencia && tc.evidencia.startsWith('data:image')) estimatedHeight += 60; // Approx image height
-                
-                if (y + estimatedHeight > pdf.internal.pageSize.getHeight() - margin - 10) {
-                    addPageWithHeader();
-                }
-                
-                const cardStartY = y;
-                
-                pdf.setFillColor(245, 245, 245);
-                pdf.rect(margin, y - 5, contentWidth, 12, 'F');
-                pdf.setFont('helvetica', 'bold').setFontSize(12).setTextColor(51, 51, 51);
-                pdf.text(`CASO: ${tc.casoPrueba} — ${tc.proceso}`, margin + 2, y + 2);
-                y += 13;
-                
                 renderField('Descripción:', tc.descripcion);
                 renderField('Paso a Paso:', tc.pasoAPaso, true);
                 renderField('Datos de Prueba:', tc.datosPrueba);
@@ -707,13 +744,10 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                     try {
                         const img = new Image();
                         img.src = tc.evidencia;
-                        
                         const imgWidth = contentWidth - 4;
                         const imgHeight = (img.height * imgWidth) / img.width;
                         
-                        if (y + imgHeight > pdf.internal.pageSize.getHeight() - margin - 10) {
-                            addPageWithHeader();
-                        }
+                        if (y + imgHeight > pdf.internal.pageSize.getHeight() - margin - 5) addPageWithHeader();
                         pdf.addImage(tc.evidencia, 'PNG', margin + 2, y, imgWidth, imgHeight, undefined, 'FAST');
                         y += imgHeight + 5;
                     } catch (e) { addTextBox('Error al cargar imagen', {}); }
@@ -723,10 +757,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                     addTextBox('-', { fontSize: 10 });
                 }
                 
-                const cardFinalY = y;
-                pdf.setDrawColor(224, 224, 224);
-                pdf.rect(margin, cardStartY - 5, contentWidth, cardFinalY - cardStartY, 'S');
-                y += 5;
+                y += 5; // spacing between cards
             }
         }
         
@@ -741,7 +772,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         if (pieChartEl && barChartEl) {
           const addChart = async (element: HTMLElement, options: { width: number; x: number; y: number; }) => {
               const canvas = await html2canvas(element, { scale: 3, backgroundColor: '#ffffff', useCORS: true });
-              const imgData = canvas.toDataURL('image/png', 0.95);
+              const imgData = canvas.toDataURL('image/png');
               const imgWidth = options.width;
               const imgHeight = (canvas.height * imgWidth) / canvas.width;
               
@@ -754,8 +785,9 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
           };
           
           const chartWidth = contentWidth / 2 - 5;
-          await addChart(pieChartEl, { width: chartWidth, x: margin, y: y });
-          await addChart(barChartEl, { width: chartWidth, x: margin + chartWidth + 10, y: y });
+          const chartY = y;
+          await addChart(pieChartEl, { width: chartWidth, x: margin, y: chartY });
+          await addChart(barChartEl, { width: chartWidth, x: margin + chartWidth + 10, y: chartY });
         }
 
         pdf.save(`reporte-fallos-${format(new Date(), 'yyyy-MM-dd')}.pdf`);

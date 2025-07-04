@@ -49,10 +49,25 @@ const statusIcons: Record<TestCaseStatus, React.ReactNode> = {
 }
 
 const TestwareLogo = ({ className }: { className?: string }) => (
-    <div className={cn("flex items-center justify-center", className)}>
-      <Bug className="h-5 w-5 -rotate-12 translate-x-1" />
-      <Search className="h-6 w-6 -translate-x-1" />
-    </div>
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={cn("h-6 w-6 text-primary", className)}
+  >
+    <path d="m15 15-3.375-3.375" />
+    <path d="M19 11a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z" />
+    <path d="M22 22 18 18" />
+    <path d="M13.723 10.377a5.002 5.002 0 0 0-4.098 4.098" />
+    <path d="M18 12a2 2 0 0 1-2-2" />
+    <path d="M14 8a2 2 0 0 1-2-2" />
+    <path d="M12 6a2 2 0 0 0-2-2" />
+    <path d="M8 10a2 2 0 0 0-2-2" />
+  </svg>
 );
 
 
@@ -156,7 +171,7 @@ const TestwareDashboard: React.FC = () => {
   const handleDeleteTestCase = useCallback((id: string) => {
     setTestCases(prev => prev.filter(tc => tc.id !== id));
     toast({ title: "Caso de prueba eliminado", variant: "destructive" });
-  }, []);
+  }, [toast]);
 
   const handleClearData = () => {
     setTestCases([]);
@@ -178,7 +193,7 @@ const TestwareDashboard: React.FC = () => {
         <header className="sticky top-0 z-10 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="container flex h-16 items-center justify-between">
             <div className="flex gap-2 items-center">
-              <TestwareLogo className="h-8 w-8 text-primary" />
+              <TestwareLogo/>
               <h1 className="text-2xl font-bold tracking-tight font-headline">TESTWARE</h1>
             </div>
             <div className="flex items-center justify-end space-x-2">
@@ -200,7 +215,7 @@ const TestwareDashboard: React.FC = () => {
                 </Button>
               </div>
             ) : (
-            <div className="space-y-4">
+            <div className="space-y-6">
               {filteredCases.map((tc) => (
                 <TestCaseCard key={tc.id} testCase={tc} onUpdate={handleUpdate} onDelete={handleDeleteTestCase} />
               ))}
@@ -370,7 +385,6 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCas
   
   const [comments, setComments] = useState(testCase.comentarios);
 
-  // Debounce comments update to improve performance
   useEffect(() => {
     const handler = setTimeout(() => {
       if (comments !== testCase.comentarios) {
@@ -381,7 +395,6 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCas
     return () => clearTimeout(handler);
   }, [comments, testCase.comentarios, testCase.id, onUpdate]);
   
-  // Sync local state if prop changes from external source
   useEffect(() => {
     if (testCase.comentarios !== comments) {
       setComments(testCase.comentarios);
@@ -416,82 +429,88 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCas
   };
 
   return (
-    <Card className="overflow-hidden">
-      <CardHeader className="flex flex-row items-center justify-between bg-muted/50 p-4">
-        <CardTitle className="font-mono text-base">{testCase.casoPrueba}</CardTitle>
-        <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => onDelete(testCase.id)}>
-          <Trash2 className="h-4 w-4" />
-        </Button>
-      </CardHeader>
-      <CardContent className="p-6 grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
-        <div className="md:col-span-2 space-y-4">
-            <InfoField label="Proceso" value={testCase.proceso} />
-            <InfoField label="Descripción" value={testCase.descripcion} preWrap />
-            <InfoField label="Paso a Paso" value={testCase.pasoAPaso} preWrap />
-            <InfoField label="Datos de Prueba" value={testCase.datosPrueba} />
-            <InfoField label="Resultado Esperado" value={testCase.resultadoEsperado} />
+    <Card className="overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300">
+      <CardHeader className="flex flex-row items-center justify-between bg-card p-4 border-b">
+        <div className="flex flex-col">
+          <CardTitle className="font-headline text-lg tracking-tight">{testCase.proceso}</CardTitle>
+          <p className="font-mono text-sm text-muted-foreground mt-1">{testCase.casoPrueba}</p>
         </div>
-        
-        <div className="space-y-2">
-          <Label>Estado</Label>
-          <Select
-            value={testCase.estado}
-            onValueChange={(value) => onUpdate(testCase.id, 'estado', value as TestCaseStatus)}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Seleccionar estado..." />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.keys(statusMap)
-                .map((status) => (
-                  <SelectItem key={status} value={status}>
-                    <div className="flex items-center gap-2">
-                      {statusIcons[status as TestCaseStatus]}
-                      <span>{statusMap[status as TestCaseStatus]}</span>
-                    </div>
-                  </SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
-        </div>
-        
-        <div className="space-y-2">
-          <Label>Comentarios</Label>
-          <Textarea 
-            value={comments} 
-            onChange={e => setComments(e.target.value)} 
-            className="min-h-[80px]" 
-            placeholder={testCase.estado === 'Failed' ? 'Razón del fallo requerida' : 'Comentarios adicionales...'}
-          />
-        </div>
-
-        <div className="md:col-span-2 space-y-2">
-          <Label>Evidencia</Label>
-          <div className="flex items-center gap-2">
-            <Input 
-              value={testCase.evidencia} 
-              onChange={e => onUpdate(testCase.id, 'evidencia', e.target.value)} 
-              placeholder={testCase.estado === 'Failed' ? 'URL de evidencia requerida' : 'Pega la URL o carga una imagen'} 
-            />
-            <input
-              type="file"
-              ref={evidenceInputRef}
-              className="hidden"
-              accept="image/*"
-              onChange={handleEvidenceSelect}
-            />
-            <Button variant="outline" onClick={() => evidenceInputRef.current?.click()}>
-              <Upload className="h-4 w-4 mr-2"/>
-              Cargar
+        <div className="flex items-center gap-2">
+            <Select
+              value={testCase.estado}
+              onValueChange={(value) => onUpdate(testCase.id, 'estado', value as TestCaseStatus)}
+            >
+              <SelectTrigger className="w-[150px] font-semibold">
+                <SelectValue placeholder="Seleccionar estado..." />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.keys(statusMap)
+                  .map((status) => (
+                    <SelectItem key={status} value={status}>
+                      <div className="flex items-center gap-2">
+                        {statusIcons[status as TestCaseStatus]}
+                        <span>{statusMap[status as TestCaseStatus]}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => onDelete(testCase.id)}>
+              <Trash2 className="h-4 w-4" />
             </Button>
-          </div>
-          {testCase.evidencia && (
-            <a href={testCase.evidencia} target="_blank" rel="noopener noreferrer" className="mt-2 block">
-              <img src={testCase.evidencia} alt="Vista previa de la evidencia" data-ai-hint="evidence screenshot" className="w-full max-w-sm rounded-md object-cover max-h-48 hover:opacity-80 transition-opacity border" onError={(e) => (e.currentTarget.style.display = 'none')} />
-            </a>
-          )}
         </div>
+      </CardHeader>
+      <CardContent className="p-6 space-y-6">
+        <InfoField label="Descripción" value={testCase.descripcion} preWrap />
+        <InfoField label="Paso a Paso" value={testCase.pasoAPaso} preWrap />
+        <InfoField label="Datos de Prueba" value={testCase.datosPrueba} />
+        <InfoField label="Resultado Esperado" value={testCase.resultadoEsperado} />
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t">
+          <div className="space-y-2">
+            <Label htmlFor={`comments-${testCase.id}`} className="font-semibold">Comentarios</Label>
+            <Textarea 
+              id={`comments-${testCase.id}`}
+              value={comments} 
+              onChange={e => setComments(e.target.value)} 
+              className="min-h-[100px] bg-background/50" 
+              placeholder={testCase.estado === 'Failed' ? 'Razón del fallo requerida' : 'Comentarios adicionales...'}
+            />
+          </div>
 
+          <div className="space-y-2">
+            <Label htmlFor={`evidence-${testCase.id}`} className="font-semibold">Evidencia</Label>
+            <div className="flex items-center gap-2">
+              <Input
+                id={`evidence-${testCase.id}`} 
+                value={testCase.evidencia} 
+                onChange={e => onUpdate(testCase.id, 'evidencia', e.target.value)} 
+                placeholder={testCase.estado === 'Failed' ? 'URL de evidencia requerida' : 'Pega la URL o carga una imagen'}
+                className="bg-background/50"
+              />
+              <input
+                type="file"
+                ref={evidenceInputRef}
+                className="hidden"
+                accept="image/*"
+                onChange={handleEvidenceSelect}
+              />
+              <Button variant="outline" onClick={() => evidenceInputRef.current?.click()}>
+                <Upload className="h-4 w-4"/>
+              </Button>
+            </div>
+            {testCase.evidencia && testCase.evidencia.startsWith('data:image') && (
+              <a href={testCase.evidencia} target="_blank" rel="noopener noreferrer" className="mt-2 block">
+                <img src={testCase.evidencia} alt="Vista previa de la evidencia" data-ai-hint="evidence screenshot" className="w-full rounded-md object-cover max-h-48 hover:opacity-80 transition-opacity border" />
+              </a>
+            )}
+            {testCase.evidencia && !testCase.evidencia.startsWith('data:image') && (
+              <a href={testCase.evidencia} target="_blank" rel="noopener noreferrer" className="mt-2 text-primary hover:underline text-sm break-all">
+                {testCase.evidencia}
+              </a>
+            )}
+          </div>
+        </div>
       </CardContent>
     </Card>
   )
@@ -499,9 +518,9 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCas
 TestCaseCard.displayName = "TestCaseCard";
 
 const InfoField = ({ label, value, preWrap = false }) => (
-  <div>
-    <p className="text-sm font-semibold text-muted-foreground">{label}</p>
-    <p className={`text-sm mt-1 ${preWrap ? 'whitespace-pre-wrap font-code' : ''}`}>{value || '-'}</p>
+  <div className="space-y-1">
+    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
+    <p className={`text-sm ${preWrap ? 'whitespace-pre-wrap font-code bg-muted/50 p-3 rounded-md' : 'font-body'}`}>{value || <span className="text-muted-foreground/70">-</span>}</p>
   </div>
 );
 
@@ -703,5 +722,3 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[] }> = ({ failedCase
 };
 
 export default TestwareDashboard;
-
-    

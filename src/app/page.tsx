@@ -26,8 +26,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { useToast } from "@/hooks/use-toast";
-import { generateReportAction } from '@/app/actions';
-import { Upload, Download, Trash2, FileText, Loader2, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter, PieChart as PieChartIcon, Search, Bug, ClipboardList } from 'lucide-react';
+import { generateReportAction, generateImprovementReportAction } from '@/app/actions';
+import { Upload, Download, Trash2, FileText, Loader2, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter, PieChart as PieChartIcon, Search, Bug, ClipboardList, Lightbulb } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
@@ -80,8 +80,7 @@ const TestwareLogo = ({ className }: { className?: string }) => (
 const simpleUUID = () => {
   // A basic UUID v4 generator
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
 };
@@ -157,6 +156,8 @@ const TestwareDashboard: React.FC = () => {
   }, []);
 
   const processes = useMemo(() => ['all', ...Array.from(new Set(testCases.map(tc => tc.proceso))).filter(Boolean)], [testCases]);
+  const failedCases = useMemo(() => testCases.filter(tc => tc.estado === 'Failed'), [testCases]);
+  const commentedCases = useMemo(() => testCases.filter(tc => tc.comentarios?.trim()), [testCases]);
 
   const filteredCases = useMemo(() => {
     return testCases.filter(tc => 
@@ -259,8 +260,8 @@ const TestwareDashboard: React.FC = () => {
             <div className="flex items-center justify-end space-x-2">
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".json" className="hidden" id="json-upload" />
               <Button variant="outline" onClick={() => fileInputRef.current?.click()}><Upload /> Cargar JSON</Button>
-              <GeneralReportDialog allCases={testCases} stats={stats} />
-              <FailureReportDialog failedCases={testCases.filter(tc => tc.estado === 'Failed')} allCases={testCases} stats={stats} />
+              <ImprovementReportDialog commentedCases={commentedCases} allCases={testCases} />
+              <FailureReportDialog failedCases={failedCases} allCases={testCases} />
               <Button variant="destructive" onClick={handleClearData} disabled={!testCases.length}><Trash2 /> Limpiar Todo</Button>
             </div>
           </div>
@@ -572,7 +573,7 @@ const InfoField = ({ label, value, preWrap = false }) => (
   </div>
 );
 
-const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCase[]; stats: any }> = ({ failedCases, allCases, stats }) => {
+const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCase[] }> = ({ failedCases, allCases }) => {
   const [impactAnalysis, setImpactAnalysis] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
@@ -610,129 +611,97 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
     try {
         const pdf = new jsPDF('p', 'mm', 'a4');
         const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = pdf.internal.pageSize.getHeight();
         const margin = 15;
         const contentWidth = pdfWidth - (margin * 2);
-        let y = 0;
-        let pageNumber = 1;
-
-        const addHeaderAndFooter = (isFirstPage = false) => {
-            if (isFirstPage) {
-                y = 60; 
-                return;
-            }
-            if (pageNumber > 1) {
-              pdf.setFontSize(10);
-              pdf.setTextColor(100);
-              pdf.text('Informe de Hallazgos de QA', margin, margin - 5);
-              pdf.setLineWidth(0.5);
-              pdf.line(margin, margin, pdfWidth - margin, margin);
-
-              // Footer
-              pdf.setTextColor(150);
-              pdf.text(`Página ${pageNumber}`, pdfWidth - margin, pdf.internal.pageSize.getHeight() - margin + 10, { align: 'right' });
-            }
-            y = margin + 5;
-        };
+        let y = margin;
         
-        const addPageWithHeader = () => {
+        const addPageWithHeader = (title: string) => {
             pdf.addPage();
-            pageNumber++;
-            addHeaderAndFooter();
+            y = margin;
+            pdf.setFontSize(10).setTextColor(100);
+            pdf.text(title, margin, y);
+            y += 4;
+            pdf.setLineWidth(0.5).line(margin, y, pdfWidth - margin, y);
+            y += 8;
         };
 
         const addTextBox = (text: string, options: any = {}) => {
-            const { isTitle = false, isSubtitle = false, isCode = false, color = [0, 0, 0], fontSize = 10, fontStyle = 'normal' } = options;
-        
+            const { fontSize = 10, fontStyle = 'normal', isCode = false, color = [0, 0, 0] } = options;
             pdf.setFont('helvetica', fontStyle);
             if (isCode) pdf.setFont('courier', 'normal');
-            pdf.setFontSize(fontSize);
-            pdf.setTextColor(color[0], color[1], color[2]);
-        
-            const lines = pdf.splitTextToSize(text || '-', contentWidth - (isSubtitle ? 4 : 0));
+            pdf.setFontSize(fontSize).setTextColor(color[0], color[1], color[2]);
+            const lines = pdf.splitTextToSize(text || '-', contentWidth);
             const textHeight = (pdf.getLineHeight() / pdf.internal.scaleFactor) * lines.length;
-            
-            if (y + textHeight > pdf.internal.pageSize.getHeight() - margin - 5) {
-                addPageWithHeader();
+            if (y + textHeight > pdfHeight - margin) {
+                addPageWithHeader('Informe de Hallazgos de QA (cont.)');
             }
-        
-            pdf.text(lines, margin + (isSubtitle ? 2 : 0), y);
-            y += textHeight + 2; 
+            pdf.text(lines, margin, y);
+            y += textHeight + 4;
         };
-        
+
         // --- PAGE 1: COVER ---
-        addHeaderAndFooter(true); // Special handling for first page
         const currentDate = new Date();
-        const formattedDate = format(currentDate, 'dd / MM / yyyy');
-        const evaluatedPeriod = format(currentDate, 'MMMM yyyy', { locale: es });
-        const capitalizedPeriod = evaluatedPeriod.charAt(0).toUpperCase() + evaluatedPeriod.slice(1);
         const uniqueProcesses = [...new Set(allCases.map(tc => tc.proceso).filter(Boolean))];
-        
+        y = 60;
         pdf.setFontSize(32).setFont('helvetica', 'bold').setTextColor(93, 84, 164).text('Informe de Hallazgos de QA', pdfWidth / 2, y, { align: 'center' });
         y += 10;
         pdf.setFontSize(16).setFont('helvetica', 'normal').setTextColor(119, 119, 119).text('TESTWARE', pdfWidth / 2, y, { align: 'center' });
         
         y = 110;
         addTextBox(`Elaborado por: ${authorName}`, { fontSize: 12 });
-        addTextBox(`Fecha: ${formattedDate}`, { fontSize: 12 });
+        y += 2;
+        addTextBox(`Fecha: ${format(currentDate, 'dd / MM / yyyy')}`, { fontSize: 12 });
+        y += 2;
+        const capitalizedPeriod = format(currentDate, 'MMMM yyyy', { locale: es }).replace(/^\w/, c => c.toUpperCase());
         addTextBox(`Período Evaluado: ${capitalizedPeriod}`, { fontSize: 12 });
         y += 10;
-        addTextBox('Procesos Evaluados', { fontSize: 14, fontStyle: 'bold' });
+        addTextBox('Procesos Evaluados:', { fontSize: 14, fontStyle: 'bold' });
         addTextBox(uniqueProcesses.join(', '), { fontSize: 12 });
-        
-        // --- PAGE 2: REPORT SUMMARY ---
-        addPageWithHeader();
-        addTextBox('Resumen del Reporte', { isTitle: true, fontSize: 18 });
-        y += 5;
+        y += 10;
+        addTextBox('Resumen del Reporte:', { fontSize: 14, fontStyle: 'bold' });
         addTextBox(reportDescription, { fontSize: 11 });
 
-        // --- PAGE 3: IMPACT ANALYSIS ---
+        // --- PAGE 2: IMPACT ANALYSIS ---
         if (impactAnalysis) {
-            addPageWithHeader();
-            addTextBox('Análisis de Impacto General (Generado por IA)', { isTitle: true, fontSize: 18 });
-            y += 5;
+            addPageWithHeader('Informe de Hallazgos de QA');
+            addTextBox('Análisis de Impacto General (Generado por IA)', { fontSize: 18, fontStyle: 'bold' });
             addTextBox(impactAnalysis, { fontSize: 11 });
         }
         
         // --- SUBSEQUENT PAGES: FAILED TEST CASES ---
         if (failedCases.length > 0) {
-            addPageWithHeader();
-            addTextBox('Detalle de Casos de Prueba Fallidos', { isTitle: true, fontSize: 18 });
-            y += 5;
-
+            addPageWithHeader('Informe de Hallazgos de QA');
+            addTextBox('Detalle de Casos de Prueba Fallidos', { fontSize: 18, fontStyle: 'bold' });
+            
             for (const tc of failedCases) {
                 const cardStartY = y;
+                const fieldSpacing = 4;
+                const titleSpacing = 6;
+                let estimatedHeight = 25; // Initial height for header
 
-                const estimateCardHeight = () => {
-                    let height = 25; // Header + padding
-                    const fields = [tc.descripcion, tc.pasoAPaso, tc.datosPrueba, tc.resultadoEsperado, tc.comentarios, tc.evidencia];
-                    fields.forEach(f => {
-                        if (f && !f.startsWith('data:image')) {
-                            const lines = pdf.splitTextToSize(f, contentWidth - 4);
-                            height += (pdf.getLineHeight() / pdf.internal.scaleFactor) * lines.length + 8;
-                        }
-                    });
-                    if (tc.evidencia && tc.evidencia.startsWith('data:image')) {
-                        height += 60; // Approx image height
-                    }
-                    return height;
-                };
+                const estimateTextHeight = (text: string, width: number) => (pdf.getLineHeight() / pdf.internal.scaleFactor) * pdf.splitTextToSize(text, width).length;
 
-                if (y + estimateCardHeight() > pdf.internal.pageSize.getHeight() - margin - 5) {
-                    addPageWithHeader();
-                    addTextBox('Detalle de Casos de Prueba Fallidos (cont.)', { isTitle: true, fontSize: 18 });
-                    y += 5;
+                estimatedHeight += estimateTextHeight(tc.descripcion, contentWidth) + fieldSpacing;
+                estimatedHeight += estimateTextHeight(tc.pasoAPaso, contentWidth) + fieldSpacing;
+                estimatedHeight += estimateTextHeight(tc.datosPrueba, contentWidth) + fieldSpacing;
+                estimatedHeight += estimateTextHeight(tc.resultadoEsperado, contentWidth) + fieldSpacing;
+                estimatedHeight += estimateTextHeight(tc.comentarios, contentWidth) + fieldSpacing;
+
+                if (y + estimatedHeight > pdfHeight - margin) {
+                   addPageWithHeader('Informe de Hallazgos de QA (cont.)');
+                   if(y === margin) addTextBox('Detalle de Casos de Prueba Fallidos (cont.)', { fontSize: 18, fontStyle: 'bold' });
                 }
 
-                pdf.setDrawColor(224, 224, 224);
-                pdf.setFillColor(245, 245, 245);
-                pdf.rect(margin, y - 5, contentWidth, 12, 'FD');
+                // Card Header
                 pdf.setFont('helvetica', 'bold').setFontSize(12).setTextColor(51, 51, 51);
-                pdf.text(`CASO: ${tc.casoPrueba} — ${tc.proceso}`, margin + 2, y + 2);
-                y += 13;
+                const headerText = `CASO: ${tc.casoPrueba} — ${tc.proceso}`;
+                addTextBox(headerText, { fontSize: 12, fontStyle: 'bold' });
+                y += 2;
                 
                 const renderField = (label: string, value: string, isCode = false, color = [0,0,0]) => {
                   if (!value) return;
-                  addTextBox(label, { isSubtitle: true, fontSize: 10, fontStyle: 'bold' });
+                  addTextBox(label, { fontSize: 10, fontStyle: 'bold' });
                   addTextBox(value, { isCode, color, fontSize: 10 });
                 }
 
@@ -742,55 +711,59 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                 renderField('Resultado Esperado:', tc.resultadoEsperado);
                 renderField('Comentarios de QA:', tc.comentarios, false, [192, 57, 43]);
                 
-                addTextBox('Evidencia:', { isSubtitle: true, fontSize: 10, fontStyle: 'bold' });
+                addTextBox('Evidencia:', { fontSize: 10, fontStyle: 'bold' });
                 if (tc.evidencia && tc.evidencia.startsWith('data:image')) {
                     try {
                         const img = new Image();
                         img.src = tc.evidencia;
-                        const imgWidth = contentWidth - 4;
+                        const imgWidth = contentWidth;
                         const imgHeight = (img.height * imgWidth) / img.width;
                         
-                        if (y + imgHeight > pdf.internal.pageSize.getHeight() - margin - 5) addPageWithHeader();
-                        pdf.addImage(tc.evidencia, 'PNG', margin + 2, y, imgWidth, imgHeight, undefined, 'FAST');
+                        if (y + imgHeight > pdfHeight - margin) addPageWithHeader('Informe de Hallazgos de QA (cont.)');
+                        pdf.addImage(tc.evidencia, 'PNG', margin, y, imgWidth, imgHeight, undefined, 'FAST');
                         y += imgHeight + 5;
                     } catch (e) { addTextBox('Error al cargar imagen', {}); }
                 } else if (tc.evidencia) {
-                    addTextBox(tc.evidencia, { isCode: false, color: [41, 128, 185], fontSize: 10 });
+                    addTextBox(tc.evidencia, { color: [41, 128, 185], fontSize: 10 });
                 } else {
                     addTextBox('-', { fontSize: 10 });
                 }
                 
-                y += 5; // spacing between cards
+                y += 10;
+                pdf.setLineWidth(0.2).line(margin, y, pdfWidth - margin, y);
+                y += 10;
             }
         }
         
         // --- LAST PAGE: STATISTICS ---
-        addPageWithHeader();
-        addTextBox('Estadísticas y Visualización', { isTitle: true, fontSize: 18 });
-        y += 5;
+        addPageWithHeader('Informe de Hallazgos de QA');
+        addTextBox('Estadísticas y Visualización', { fontSize: 18, fontStyle: 'bold' });
 
         const pieChartEl = document.getElementById('pdf-pie-chart-card');
         const barChartEl = document.getElementById('pdf-bar-chart-card');
         
         if (pieChartEl && barChartEl) {
-          const addChart = async (element: HTMLElement, options: { width: number; x: number; y: number; }) => {
+          const addChart = async (element: HTMLElement) => {
               const canvas = await html2canvas(element, { scale: 3, backgroundColor: '#ffffff', useCORS: true });
-              const imgData = canvas.toDataURL('image/png');
-              const imgWidth = options.width;
-              const imgHeight = (canvas.height * imgWidth) / canvas.width;
-              
-              if (options.y + imgHeight > pdf.internal.pageSize.getHeight() - margin) {
-                  addPageWithHeader();
-                  options.y = y; // Reset y for the new page
-              }
-              pdf.addImage(imgData, 'PNG', options.x, options.y, imgWidth, imgHeight, undefined, 'FAST');
-              return imgHeight;
+              return canvas.toDataURL('image/png');
           };
           
+          const pieImgData = await addChart(pieChartEl);
+          const barImgData = await addChart(barChartEl);
+
           const chartWidth = contentWidth / 2 - 5;
-          const chartY = y;
-          await addChart(pieChartEl, { width: chartWidth, x: margin, y: chartY });
-          await addChart(barChartEl, { width: chartWidth, x: margin + chartWidth + 10, y: chartY });
+          const pieImg = new Image(); pieImg.src = pieImgData;
+          const barImg = new Image(); barImg.src = barImgData;
+          
+          const pieHeight = (pieImg.height * chartWidth) / pieImg.width;
+          const barHeight = (barImg.height * chartWidth) / barImg.width;
+
+          if (y + Math.max(pieHeight, barHeight) > pdfHeight - margin) {
+            addPageWithHeader('Informe de Hallazgos de QA (cont.)');
+          }
+
+          pdf.addImage(pieImgData, 'PNG', margin, y, chartWidth, pieHeight, undefined, 'FAST');
+          pdf.addImage(barImgData, 'PNG', margin + chartWidth + 10, y, chartWidth, barHeight, undefined, 'FAST');
         }
 
         pdf.save(`reporte-fallos-${format(new Date(), 'yyyy-MM-dd')}.pdf`);
@@ -831,9 +804,9 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
            <div className="space-y-4 py-4">
             <p>Genera un reporte detallado para los {failedCases.length} caso(s) de prueba fallidos. Primero, la IA generará un análisis de impacto.</p>
             <div>
-              <Label htmlFor="author-name" className="font-semibold">Elaborado por</Label>
+              <Label htmlFor="author-name-failure" className="font-semibold">Elaborado por</Label>
               <Input
-                id="author-name"
+                id="author-name-failure"
                 placeholder="Ingresa tu nombre completo"
                 value={authorName}
                 onChange={(e) => setAuthorName(e.target.value)}
@@ -841,9 +814,9 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
               />
             </div>
             <div>
-              <Label htmlFor="report-description" className="font-semibold">Resumen del Reporte</Label>
+              <Label htmlFor="report-description-failure" className="font-semibold">Resumen del Reporte</Label>
               <Textarea
-                id="report-description"
+                id="report-description-failure"
                 placeholder="Proporciona un resumen general o contexto para este informe de fallos. Esto es requerido."
                 value={reportDescription}
                 onChange={(e) => setReportDescription(e.target.value)}
@@ -888,107 +861,109 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
   );
 };
 
-const GeneralReportDialog: React.FC<{ allCases: TestCase[]; stats: any }> = ({ allCases, stats }) => {
+const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: TestCase[] }> = ({ commentedCases, allCases }) => {
+  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [reportDescription, setReportDescription] = useState('');
   const [authorName, setAuthorName] = useState('');
   const { toast } = useToast();
 
-  const handleDownloadPdf = async () => {
+  const handleGenerate = async () => {
     if (!reportDescription.trim()) {
       toast({ title: "Resumen Requerido", description: "Por favor, proporciona un resumen para el reporte.", variant: "destructive" });
       return;
     }
-    if (!authorName.trim()) {
+     if (!authorName.trim()) {
       toast({ title: "Autor Requerido", description: "Por favor, ingresa el nombre del autor.", variant: "destructive" });
       return;
     }
+    setIsLoading(true);
+    setAnalysis(null);
+    const aiCases = commentedCases.map(({ id, ...rest }) => rest);
+    
+    try {
+      const result = await generateImprovementReportAction({ commentedTestCases: aiCases, reportDescription });
+      setAnalysis(result.improvementAnalysis);
+    } catch (error) {
+      console.error("Error generating improvement report from AI", error);
+      toast({ title: "Fallo la Generación del Reporte", description: "Ocurrió un error al contactar a la IA.", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
+  const handleDownloadPdf = async () => {
     setIsDownloadingPdf(true);
-
     try {
         const pdf = new jsPDF('p', 'mm', 'a4');
         const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = pdf.internal.pageSize.getHeight();
         const margin = 15;
         const contentWidth = pdfWidth - (margin * 2);
-        let y = 0;
-        let pageNumber = 1;
-
-        const addHeaderAndFooter = (isFirstPage = false) => {
-            if (isFirstPage) {
-                y = 60;
-                return;
-            }
-            if (pageNumber > 1) {
-              pdf.setFontSize(10);
-              pdf.setTextColor(100);
-              pdf.text('Informe General de Pruebas', margin, margin - 5);
-              pdf.setLineWidth(0.5);
-              pdf.line(margin, margin, pdfWidth - margin, margin);
-              pdf.setTextColor(150);
-              pdf.text(`Página ${pageNumber}`, pdfWidth - margin, pdf.internal.pageSize.getHeight() - margin + 10, { align: 'right' });
-            }
-            y = margin + 5;
-        };
+        let y = margin;
         
-        const addPageWithHeader = () => {
+        const addPageWithHeader = (title: string) => {
             pdf.addPage();
-            pageNumber++;
-            addHeaderAndFooter();
+            y = margin;
+            pdf.setFontSize(10).setTextColor(100);
+            pdf.text(title, margin, y);
+            y += 4;
+            pdf.setLineWidth(0.5).line(margin, y, pdfWidth - margin, y);
+            y += 8;
         };
 
         const addTextBox = (text: string, options: any = {}) => {
-            const { isTitle = false, isSubtitle = false, isCode = false, color = [0, 0, 0], fontSize = 10, fontStyle = 'normal' } = options;
-        
+            const { fontSize = 10, fontStyle = 'normal', isCode = false, color = [0, 0, 0] } = options;
             pdf.setFont('helvetica', fontStyle);
             if (isCode) pdf.setFont('courier', 'normal');
-            pdf.setFontSize(fontSize);
-            pdf.setTextColor(color[0], color[1], color[2]);
-        
-            const lines = pdf.splitTextToSize(text || '-', contentWidth - (isSubtitle ? 4 : 0));
+            pdf.setFontSize(fontSize).setTextColor(color[0], color[1], color[2]);
+            const lines = pdf.splitTextToSize(text || '-', contentWidth);
             const textHeight = (pdf.getLineHeight() / pdf.internal.scaleFactor) * lines.length;
-            
-            if (y + textHeight > pdf.internal.pageSize.getHeight() - margin - 5) {
-                addPageWithHeader();
+            if (y + textHeight > pdfHeight - margin) {
+                addPageWithHeader('Informe de Observaciones (cont.)');
             }
-        
-            pdf.text(lines, margin + (isSubtitle ? 2 : 0), y);
-            y += textHeight + 2; 
+            pdf.text(lines, margin, y);
+            y += textHeight + 4;
         };
-        
+
         // --- PAGE 1: COVER ---
-        addHeaderAndFooter(true);
         const currentDate = new Date();
-        const formattedDate = format(currentDate, 'dd / MM / yyyy');
-        const evaluatedPeriod = format(currentDate, 'MMMM yyyy', { locale: es });
-        const capitalizedPeriod = evaluatedPeriod.charAt(0).toUpperCase() + evaluatedPeriod.slice(1);
         const uniqueProcesses = [...new Set(allCases.map(tc => tc.proceso).filter(Boolean))];
-        
-        pdf.setFontSize(32).setFont('helvetica', 'bold').setTextColor(93, 84, 164).text('Informe General de Pruebas', pdfWidth / 2, y, { align: 'center' });
+        y = 60;
+        pdf.setFontSize(32).setFont('helvetica', 'bold').setTextColor(93, 84, 164).text('Informe de Observaciones', pdfWidth / 2, y, { align: 'center' });
         y += 10;
         pdf.setFontSize(16).setFont('helvetica', 'normal').setTextColor(119, 119, 119).text('TESTWARE', pdfWidth / 2, y, { align: 'center' });
         
         y = 110;
         addTextBox(`Elaborado por: ${authorName}`, { fontSize: 12 });
-        addTextBox(`Fecha: ${formattedDate}`, { fontSize: 12 });
+        y += 2;
+        addTextBox(`Fecha: ${format(currentDate, 'dd / MM / yyyy')}`, { fontSize: 12 });
+        y += 2;
+        const capitalizedPeriod = format(currentDate, 'MMMM yyyy', { locale: es }).replace(/^\w/, c => c.toUpperCase());
         addTextBox(`Período Evaluado: ${capitalizedPeriod}`, { fontSize: 12 });
         y += 10;
-        addTextBox('Procesos Evaluados', { fontSize: 14, fontStyle: 'bold' });
+        addTextBox('Procesos Evaluados:', { fontSize: 14, fontStyle: 'bold' });
         addTextBox(uniqueProcesses.join(', '), { fontSize: 12 });
-        
-        // --- PAGE 2: REPORT SUMMARY ---
-        addPageWithHeader();
-        addTextBox('Resumen del Reporte', { isTitle: true, fontSize: 18 });
-        y += 5;
+        y += 10;
+        addTextBox('Resumen del Reporte:', { fontSize: 14, fontStyle: 'bold' });
         addTextBox(reportDescription, { fontSize: 11 });
 
-        // --- SUBSEQUENT PAGES: ALL TEST CASES ---
-        if (allCases.length > 0) {
-            addPageWithHeader();
-            addTextBox('Detalle de Casos de Prueba', { isTitle: true, fontSize: 18 });
-            y += 5;
-
-            for (const tc of allCases) {
+        // --- PAGE 2: AI ANALYSIS ---
+        if (analysis) {
+            addPageWithHeader('Informe de Observaciones');
+            addTextBox('Análisis de Mejoras y Observaciones (IA)', { fontSize: 18, fontStyle: 'bold' });
+            addTextBox(analysis, { fontSize: 11 });
+        }
+        
+        // --- SUBSEQUENT PAGES: COMMENTED TEST CASES ---
+        if (commentedCases.length > 0) {
+            addPageWithHeader('Informe de Observaciones');
+            addTextBox('Detalle de Casos de Prueba Comentados', { fontSize: 18, fontStyle: 'bold' });
+            
+            for (const tc of commentedCases) {
+                const statusColor = tc.estado === 'Failed' ? '#e53935' : tc.estado === 'Passed' ? '#43a047' : '#757575';
+                
                 const estimateCardHeight = () => {
                     let height = 25; // Header
                     const fields = [tc.descripcion, tc.pasoAPaso, tc.datosPrueba, tc.resultadoEsperado, tc.comentarios, tc.evidencia];
@@ -1002,26 +977,20 @@ const GeneralReportDialog: React.FC<{ allCases: TestCase[]; stats: any }> = ({ a
                     return height;
                 };
 
-                if (y + estimateCardHeight() > pdf.internal.pageSize.getHeight() - margin - 5) {
-                    addPageWithHeader();
-                    addTextBox('Detalle de Casos de Prueba (cont.)', { isTitle: true, fontSize: 18 });
-                    y += 5;
+                if (y + estimateCardHeight() > pdfHeight - margin) {
+                    addPageWithHeader('Informe de Observaciones (cont.)');
+                    addTextBox('Detalle de Casos de Prueba Comentados (cont.)', { fontSize: 18, fontStyle: 'bold' });
                 }
-                
-                const statusColor = tc.estado === 'Failed' ? '#e53935' : tc.estado === 'Passed' ? '#43a047' : '#757575';
-                pdf.setDrawColor(224, 224, 224);
-                pdf.setFillColor(245, 245, 245);
-                pdf.rect(margin, y - 5, contentWidth, 12, 'FD');
-                pdf.setFont('helvetica', 'bold').setFontSize(12).setTextColor(51, 51, 51);
-                pdf.text(`CASO: ${tc.casoPrueba} — ${tc.proceso}`, margin + 2, y + 2);
-                pdf.setFont('helvetica', 'bold').setFontSize(10).setTextColor(statusColor);
-                pdf.text(`[${statusMap[tc.estado]}]`, pdfWidth - margin - 2, y + 2, { align: 'right' });
 
-                y += 13;
+                pdf.setFont('helvetica', 'bold').setFontSize(12).setTextColor(51, 51, 51);
+                addTextBox(`CASO: ${tc.casoPrueba} — ${tc.proceso}`, { fontSize: 12, fontStyle: 'bold' });
+                pdf.setFont('helvetica', 'bold').setFontSize(10).setTextColor(statusColor);
+                pdf.text(`[${statusMap[tc.estado]}]`, pdfWidth - margin, y - 5, { align: 'right' }); // Adjust position
+                y += 2;
                 
                 const renderField = (label: string, value: string, isCode = false, color = [0,0,0]) => {
                   if (!value) return;
-                  addTextBox(label, { isSubtitle: true, fontSize: 10, fontStyle: 'bold' });
+                  addTextBox(label, { fontSize: 10, fontStyle: 'bold' });
                   addTextBox(value, { isCode, color, fontSize: 10 });
                 }
 
@@ -1029,61 +998,33 @@ const GeneralReportDialog: React.FC<{ allCases: TestCase[]; stats: any }> = ({ a
                 renderField('Paso a Paso:', tc.pasoAPaso, true);
                 renderField('Datos de Prueba:', tc.datosPrueba);
                 renderField('Resultado Esperado:', tc.resultadoEsperado);
-                if (tc.comentarios) {
-                    const commentColor = tc.estado === 'Failed' ? [192, 57, 43] : [0, 0, 0];
-                    renderField('Comentarios:', tc.comentarios, false, commentColor);
+                if(tc.comentarios) {
+                  renderField('Comentarios:', tc.comentarios, false, tc.estado === 'Failed' ? [192, 57, 43] : [0, 0, 0]);
                 }
                 
-                addTextBox('Evidencia:', { isSubtitle: true, fontSize: 10, fontStyle: 'bold' });
+                addTextBox('Evidencia:', { fontSize: 10, fontStyle: 'bold' });
                 if (tc.evidencia && tc.evidencia.startsWith('data:image')) {
                     try {
-                        const img = new Image();
-                        img.src = tc.evidencia;
-                        const imgWidth = contentWidth - 4;
+                        const img = new Image(); img.src = tc.evidencia;
+                        const imgWidth = contentWidth;
                         const imgHeight = (img.height * imgWidth) / img.width;
-                        if (y + imgHeight > pdf.internal.pageSize.getHeight() - margin - 5) addPageWithHeader();
-                        pdf.addImage(tc.evidencia, 'PNG', margin + 2, y, imgWidth, imgHeight, undefined, 'FAST');
+                        if (y + imgHeight > pdfHeight - margin) addPageWithHeader('Informe de Observaciones (cont.)');
+                        pdf.addImage(tc.evidencia, 'PNG', margin, y, imgWidth, imgHeight, undefined, 'FAST');
                         y += imgHeight + 5;
                     } catch (e) { addTextBox('Error al cargar imagen', {}); }
                 } else if (tc.evidencia) {
-                    addTextBox(tc.evidencia, { isCode: false, color: [41, 128, 185], fontSize: 10 });
+                    addTextBox(tc.evidencia, { color: [41, 128, 185], fontSize: 10 });
                 } else {
                     addTextBox('-', { fontSize: 10 });
                 }
                 
-                y += 5;
+                y += 10;
+                pdf.setLineWidth(0.2).line(margin, y, pdfWidth - margin, y);
+                y += 10;
             }
         }
         
-        // --- LAST PAGE: STATISTICS ---
-        addPageWithHeader();
-        addTextBox('Estadísticas y Visualización', { isTitle: true, fontSize: 18 });
-        y += 5;
-
-        const pieChartEl = document.getElementById('pdf-pie-chart-card');
-        const barChartEl = document.getElementById('pdf-bar-chart-card');
-        
-        if (pieChartEl && barChartEl) {
-          const addChart = async (element: HTMLElement, options: { width: number; x: number; y: number; }) => {
-              const canvas = await html2canvas(element, { scale: 3, backgroundColor: '#ffffff', useCORS: true });
-              const imgData = canvas.toDataURL('image/png');
-              const imgWidth = options.width;
-              const imgHeight = (canvas.height * imgWidth) / canvas.width;
-              if (options.y + imgHeight > pdf.internal.pageSize.getHeight() - margin) {
-                  addPageWithHeader();
-                  options.y = y;
-              }
-              pdf.addImage(imgData, 'PNG', options.x, options.y, imgWidth, imgHeight, undefined, 'FAST');
-              return imgHeight;
-          };
-          
-          const chartWidth = contentWidth / 2 - 5;
-          const chartY = y;
-          await addChart(pieChartEl, { width: chartWidth, x: margin, y: chartY });
-          await addChart(barChartEl, { width: chartWidth, x: margin + chartWidth + 10, y: chartY });
-        }
-
-        pdf.save(`reporte-general-${format(new Date(), 'yyyy-MM-dd')}.pdf`);
+        pdf.save(`reporte-observaciones-${format(new Date(), 'yyyy-MM-dd')}.pdf`);
     } catch (error) {
         console.error("Error generating PDF:", error);
         toast({ title: "Error de PDF", description: "No se pudo generar el archivo PDF.", variant: "destructive" });
@@ -1093,27 +1034,37 @@ const GeneralReportDialog: React.FC<{ allCases: TestCase[]; stats: any }> = ({ a
   };
 
   const resetDialog = () => {
+    setAnalysis(null);
     setReportDescription('');
     setAuthorName('');
+    setIsLoading(false);
     setIsDownloadingPdf(false);
   };
 
   return (
     <Dialog onOpenChange={(open) => !open && resetDialog()}>
       <DialogTrigger asChild>
-        <Button variant="outline" disabled={!allCases.length}><ClipboardList /> Informe General</Button>
+        <Button variant="outline" disabled={!commentedCases.length}><Lightbulb /> Informe de Observaciones ({commentedCases.length})</Button>
       </DialogTrigger>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Generar Informe General de Pruebas en PDF</DialogTitle>
+          <DialogTitle>Generar Informe de Observaciones con IA</DialogTitle>
         </DialogHeader>
         
-        <div className="space-y-4 py-4">
-            <p>Genera un reporte detallado con los {allCases.length} caso(s) de prueba. El informe incluirá todos los casos, independientemente de su estado.</p>
+        {isLoading && (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-8 w-8 animate-spin" />
+            <p className="ml-4">Generando análisis de mejoras...</p>
+          </div>
+        )}
+
+        {!isLoading && !analysis && (
+           <div className="space-y-4 py-4">
+            <p>Genera un reporte inteligente para los {commentedCases.length} caso(s) de prueba que tienen comentarios. La IA analizará los comentarios para sugerir mejoras y observaciones.</p>
             <div>
-              <Label htmlFor="general-author-name" className="font-semibold">Elaborado por</Label>
+              <Label htmlFor="author-name-improvement" className="font-semibold">Elaborado por</Label>
               <Input
-                id="general-author-name"
+                id="author-name-improvement"
                 placeholder="Ingresa tu nombre completo"
                 value={authorName}
                 onChange={(e) => setAuthorName(e.target.value)}
@@ -1121,35 +1072,48 @@ const GeneralReportDialog: React.FC<{ allCases: TestCase[]; stats: any }> = ({ a
               />
             </div>
             <div>
-              <Label htmlFor="general-report-description" className="font-semibold">Resumen del Reporte</Label>
+              <Label htmlFor="report-description-improvement" className="font-semibold">Resumen del Reporte</Label>
               <Textarea
-                id="general-report-description"
-                placeholder="Proporciona un resumen general o contexto para este informe. Esto es requerido."
+                id="report-description-improvement"
+                placeholder="Proporciona un resumen general o contexto. La IA lo usará para su análisis."
                 value={reportDescription}
                 onChange={(e) => setReportDescription(e.target.value)}
                 className="mt-2 min-h-[100px]"
               />
             </div>
+            <Button onClick={handleGenerate} className="w-full bg-primary hover:bg-primary/90">Generar Análisis de IA</Button>
           </div>
+        )}
         
-        <DialogFooter>
-          <DialogClose asChild>
-            <Button variant="secondary">Cerrar</Button>
-          </DialogClose>
-          <Button onClick={handleDownloadPdf} disabled={isDownloadingPdf}>
-            {isDownloadingPdf ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Descargando...
-              </>
-            ) : (
-              <>
-                <Download className="mr-2 h-4 w-4" />
-                Descargar PDF
-              </>
-            )}
-          </Button>
-        </DialogFooter>
+        {!isLoading && analysis && (
+          <>
+            <div className="space-y-4 py-2">
+                <h3 className="font-semibold">Análisis de Mejoras y Observaciones (IA):</h3>
+                 <div className="max-h-[30vh] overflow-y-auto p-4 bg-muted/50 rounded-md">
+                    <pre className="whitespace-pre-wrap font-sans text-sm">{analysis}</pre>
+                </div>
+                <p className="text-sm text-muted-foreground">El análisis ha sido generado. Ahora puedes descargar el informe completo en formato PDF.</p>
+            </div>
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="secondary">Cerrar</Button>
+              </DialogClose>
+              <Button onClick={handleDownloadPdf} disabled={isDownloadingPdf}>
+                {isDownloadingPdf ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Descargando...
+                  </>
+                ) : (
+                  <>
+                    <Download className="mr-2 h-4 w-4" />
+                    Descargar PDF
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

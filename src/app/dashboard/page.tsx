@@ -27,7 +27,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { Sheet, SheetContent } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -431,6 +431,9 @@ const TestwareDashboard: React.FC = () => {
       </div>
        <Sheet open={isMobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
         <SheetContent side="left" className="p-0 w-80">
+          <SheetHeader className="sr-only">
+            <SheetTitle>Menú Principal</SheetTitle>
+          </SheetHeader>
           <Sidebar 
             stats={stats}
             processes={processes}
@@ -1476,4 +1479,3 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
 
 
 export default TestwareDashboard;
-

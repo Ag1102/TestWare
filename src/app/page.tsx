@@ -260,7 +260,7 @@ const TestwareDashboard: React.FC = () => {
             <div className="flex items-center justify-end space-x-2">
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".json" className="hidden" id="json-upload" />
               <Button variant="outline" onClick={() => fileInputRef.current?.click()}><Upload /> Cargar JSON</Button>
-              <ImprovementReportDialog commentedCases={commentedCases} allCases={testCases} />
+              <ImprovementReportDialog commentedCases={commentedCases} allCases={testCases} stats={stats}/>
               <FailureReportDialog failedCases={failedCases} allCases={testCases} />
               <Button variant="destructive" onClick={handleClearData} disabled={!testCases.length}><Trash2 /> Limpiar Todo</Button>
             </div>
@@ -606,6 +606,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
   };
 
   const handleDownloadPdf = async () => {
+    if (isDownloadingPdf) return;
     setIsDownloadingPdf(true);
 
     try {
@@ -616,11 +617,14 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         const contentWidth = pdfWidth - (margin * 2);
         let y = margin;
         
-        const addPageWithHeader = (title: string) => {
-            pdf.addPage();
+        const addPageWithHeader = (title: string, pageNumber: number) => {
+            if (pageNumber > 1) {
+              pdf.addPage();
+            }
             y = margin;
             pdf.setFontSize(10).setTextColor(100);
             pdf.text(title, margin, y);
+            pdf.text(`Página ${pageNumber}`, pdfWidth - margin, y, { align: 'right' });
             y += 4;
             pdf.setLineWidth(0.5).line(margin, y, pdfWidth - margin, y);
             y += 8;
@@ -634,13 +638,19 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
             const lines = pdf.splitTextToSize(text || '-', contentWidth);
             const textHeight = (pdf.getLineHeight() / pdf.internal.scaleFactor) * lines.length;
             if (y + textHeight > pdfHeight - margin) {
-                addPageWithHeader('Informe de Hallazgos de QA (cont.)');
+                pdf.addPage();
+                y = margin;
+                // Simplified header for subsequent pages
+                pdf.setFontSize(10).setTextColor(100);
+                pdf.text('Informe de Hallazgos de QA (cont.)', margin, y);
+                y += 12;
             }
             pdf.text(lines, margin, y);
             y += textHeight + 4;
         };
 
         // --- PAGE 1: COVER ---
+        let pageCounter = 1;
         const currentDate = new Date();
         const uniqueProcesses = [...new Set(allCases.map(tc => tc.proceso).filter(Boolean))];
         y = 60;
@@ -658,43 +668,52 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         y += 10;
         addTextBox('Procesos Evaluados:', { fontSize: 14, fontStyle: 'bold' });
         addTextBox(uniqueProcesses.join(', '), { fontSize: 12 });
-        y += 10;
-        addTextBox('Resumen del Reporte:', { fontSize: 14, fontStyle: 'bold' });
+
+        // --- PAGE 2: SUMMARY ---
+        pdf.addPage();
+        pageCounter++;
+        y = margin;
+        addTextBox('Resumen del Reporte', { fontSize: 18, fontStyle: 'bold' });
         addTextBox(reportDescription, { fontSize: 11 });
 
-        // --- PAGE 2: IMPACT ANALYSIS ---
+
+        // --- PAGE 3: IMPACT ANALYSIS ---
         if (impactAnalysis) {
-            addPageWithHeader('Informe de Hallazgos de QA');
+            pdf.addPage();
+            pageCounter++;
+            y = margin;
             addTextBox('Análisis de Impacto General (Generado por IA)', { fontSize: 18, fontStyle: 'bold' });
             addTextBox(impactAnalysis, { fontSize: 11 });
         }
         
         // --- SUBSEQUENT PAGES: FAILED TEST CASES ---
         if (failedCases.length > 0) {
-            addPageWithHeader('Informe de Hallazgos de QA');
+            pdf.addPage();
+            pageCounter++;
+            y = margin;
             addTextBox('Detalle de Casos de Prueba Fallidos', { fontSize: 18, fontStyle: 'bold' });
+            y += 5;
             
             for (const tc of failedCases) {
                 const cardStartY = y;
-                const fieldSpacing = 4;
-                const titleSpacing = 6;
-                let estimatedHeight = 25; // Initial height for header
+                
+                // Estimate height
+                let estimatedHeight = 25; // Header
+                const fieldsToEstimate = [tc.descripcion, tc.pasoAPaso, tc.datosPrueba, tc.resultadoEsperado, tc.comentarios];
+                fieldsToEstimate.forEach(field => {
+                  estimatedHeight += (pdf.splitTextToSize(field, contentWidth).length * 5) + 4;
+                })
+                if (tc.evidencia) estimatedHeight += (tc.evidencia.startsWith('data:image') ? 50 : 15);
 
-                const estimateTextHeight = (text: string, width: number) => (pdf.getLineHeight() / pdf.internal.scaleFactor) * pdf.splitTextToSize(text, width).length;
-
-                estimatedHeight += estimateTextHeight(tc.descripcion, contentWidth) + fieldSpacing;
-                estimatedHeight += estimateTextHeight(tc.pasoAPaso, contentWidth) + fieldSpacing;
-                estimatedHeight += estimateTextHeight(tc.datosPrueba, contentWidth) + fieldSpacing;
-                estimatedHeight += estimateTextHeight(tc.resultadoEsperado, contentWidth) + fieldSpacing;
-                estimatedHeight += estimateTextHeight(tc.comentarios, contentWidth) + fieldSpacing;
 
                 if (y + estimatedHeight > pdfHeight - margin) {
-                   addPageWithHeader('Informe de Hallazgos de QA (cont.)');
-                   if(y === margin) addTextBox('Detalle de Casos de Prueba Fallidos (cont.)', { fontSize: 18, fontStyle: 'bold' });
+                   pdf.addPage();
+                   y = margin;
+                   addTextBox('Detalle de Casos de Prueba Fallidos (cont.)', { fontSize: 16, fontStyle: 'bold' });
+                   y += 5;
                 }
 
                 // Card Header
-                pdf.setFont('helvetica', 'bold').setFontSize(12).setTextColor(51, 51, 51);
                 const headerText = `CASO: ${tc.casoPrueba} — ${tc.proceso}`;
                 addTextBox(headerText, { fontSize: 12, fontStyle: 'bold' });
                 y += 2;
@@ -719,7 +738,10 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                         const imgWidth = contentWidth;
                         const imgHeight = (img.height * imgWidth) / img.width;
                         
-                        if (y + imgHeight > pdfHeight - margin) addPageWithHeader('Informe de Hallazgos de QA (cont.)');
+                        if (y + imgHeight > pdfHeight - margin) {
+                          pdf.addPage();
+                          y = margin;
+                        }
                         pdf.addImage(tc.evidencia, 'PNG', margin, y, imgWidth, imgHeight, undefined, 'FAST');
                         y += imgHeight + 5;
                     } catch (e) { addTextBox('Error al cargar imagen', {}); }
@@ -736,7 +758,8 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         }
         
         // --- LAST PAGE: STATISTICS ---
-        addPageWithHeader('Informe de Hallazgos de QA');
+        pdf.addPage();
+        y = margin;
         addTextBox('Estadísticas y Visualización', { fontSize: 18, fontStyle: 'bold' });
 
         const pieChartEl = document.getElementById('pdf-pie-chart-card');
@@ -744,8 +767,8 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         
         if (pieChartEl && barChartEl) {
           const addChart = async (element: HTMLElement) => {
-              const canvas = await html2canvas(element, { scale: 3, backgroundColor: '#ffffff', useCORS: true });
-              return canvas.toDataURL('image/png');
+              const canvas = await html2canvas(element, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
+              return canvas.toDataURL('image/png', 0.95);
           };
           
           const pieImgData = await addChart(pieChartEl);
@@ -759,7 +782,9 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
           const barHeight = (barImg.height * chartWidth) / barImg.width;
 
           if (y + Math.max(pieHeight, barHeight) > pdfHeight - margin) {
-            addPageWithHeader('Informe de Hallazgos de QA (cont.)');
+            pdf.addPage();
+            y = margin;
+            addTextBox('Estadísticas y Visualización (cont.)', { fontSize: 16, fontStyle: 'bold' });
           }
 
           pdf.addImage(pieImgData, 'PNG', margin, y, chartWidth, pieHeight, undefined, 'FAST');
@@ -780,7 +805,6 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
     setReportDescription('');
     setAuthorName('');
     setIsLoading(false);
-    setIsDownloadingPdf(false);
   }
 
   return (
@@ -861,7 +885,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
   );
 };
 
-const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: TestCase[] }> = ({ commentedCases, allCases }) => {
+const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: TestCase[]; stats: any }> = ({ commentedCases, allCases, stats }) => {
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
@@ -894,6 +918,7 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
   };
 
   const handleDownloadPdf = async () => {
+    if (isDownloadingPdf) return;
     setIsDownloadingPdf(true);
     try {
         const pdf = new jsPDF('p', 'mm', 'a4');
@@ -921,7 +946,11 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
             const lines = pdf.splitTextToSize(text || '-', contentWidth);
             const textHeight = (pdf.getLineHeight() / pdf.internal.scaleFactor) * lines.length;
             if (y + textHeight > pdfHeight - margin) {
-                addPageWithHeader('Informe de Observaciones (cont.)');
+                pdf.addPage();
+                y = margin;
+                pdf.setFontSize(10).setTextColor(100);
+                pdf.text('Informe de Observaciones (cont.)', margin, y);
+                y += 12;
             }
             pdf.text(lines, margin, y);
             y += textHeight + 4;
@@ -946,46 +975,52 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
         addTextBox('Procesos Evaluados:', { fontSize: 14, fontStyle: 'bold' });
         addTextBox(uniqueProcesses.join(', '), { fontSize: 12 });
         y += 10;
-        addTextBox('Resumen del Reporte:', { fontSize: 14, fontStyle: 'bold' });
-        addTextBox(reportDescription, { fontSize: 11 });
 
-        // --- PAGE 2: AI ANALYSIS ---
+        // --- PAGE 2: SUMMARY & AI ANALYSIS ---
+        pdf.addPage();
+        y = margin;
+        addTextBox('Resumen del Reporte', { fontSize: 18, fontStyle: 'bold' });
+        addTextBox(reportDescription, { fontSize: 11 });
+        y += 5;
+
         if (analysis) {
-            addPageWithHeader('Informe de Observaciones');
             addTextBox('Análisis de Mejoras y Observaciones (IA)', { fontSize: 18, fontStyle: 'bold' });
             addTextBox(analysis, { fontSize: 11 });
+            y += 5;
+
+            const conclusionText = 'Se deja constancia de que la ejecución de los casos de prueba se ha completado satisfactoriamente, cumpliendo con los resultados esperados para los flujos evaluados. Las observaciones detalladas en este informe tienen como único fin la mejora continua del producto y no representan fallos funcionales.';
+            addTextBox('Conclusión General', { fontSize: 14, fontStyle: 'bold' });
+            addTextBox(conclusionText, { fontSize: 11, fontStyle: 'italic', color: [100, 100, 100] });
         }
         
         // --- SUBSEQUENT PAGES: COMMENTED TEST CASES ---
         if (commentedCases.length > 0) {
-            addPageWithHeader('Informe de Observaciones');
+            pdf.addPage();
+            y = margin;
             addTextBox('Detalle de Casos de Prueba Comentados', { fontSize: 18, fontStyle: 'bold' });
+            y += 5;
             
             for (const tc of commentedCases) {
                 const statusColor = tc.estado === 'Failed' ? '#e53935' : tc.estado === 'Passed' ? '#43a047' : '#757575';
                 
-                const estimateCardHeight = () => {
-                    let height = 25; // Header
-                    const fields = [tc.descripcion, tc.pasoAPaso, tc.datosPrueba, tc.resultadoEsperado, tc.comentarios, tc.evidencia];
-                    fields.forEach(f => {
-                        if (f && !f.startsWith('data:image')) {
-                            const lines = pdf.splitTextToSize(f, contentWidth - 4);
-                            height += (pdf.getLineHeight() / pdf.internal.scaleFactor) * lines.length + 8;
-                        }
-                    });
-                    if (tc.evidencia && tc.evidencia.startsWith('data:image')) height += 60;
-                    return height;
-                };
+                let estimatedHeight = 25; // Header
+                const fieldsToEstimate = [tc.descripcion, tc.pasoAPaso, tc.datosPrueba, tc.resultadoEsperado, tc.comentarios];
+                fieldsToEstimate.forEach(field => {
+                  estimatedHeight += (pdf.splitTextToSize(field, contentWidth).length * 5) + 4;
+                })
+                if (tc.evidencia) estimatedHeight += (tc.evidencia.startsWith('data:image') ? 50 : 15);
 
-                if (y + estimateCardHeight() > pdfHeight - margin) {
-                    addPageWithHeader('Informe de Observaciones (cont.)');
-                    addTextBox('Detalle de Casos de Prueba Comentados (cont.)', { fontSize: 18, fontStyle: 'bold' });
+                if (y + estimatedHeight > pdfHeight - margin) {
+                    pdf.addPage();
+                    y = margin;
+                    addTextBox('Detalle de Casos de Prueba Comentados (cont.)', { fontSize: 16, fontStyle: 'bold' });
+                    y += 5;
                 }
 
                 pdf.setFont('helvetica', 'bold').setFontSize(12).setTextColor(51, 51, 51);
                 addTextBox(`CASO: ${tc.casoPrueba} — ${tc.proceso}`, { fontSize: 12, fontStyle: 'bold' });
                 pdf.setFont('helvetica', 'bold').setFontSize(10).setTextColor(statusColor);
-                pdf.text(`[${statusMap[tc.estado]}]`, pdfWidth - margin, y - 5, { align: 'right' }); // Adjust position
+                pdf.text(`[${statusMap[tc.estado]}]`, pdfWidth - margin, y - 5, { align: 'right' }); 
                 y += 2;
                 
                 const renderField = (label: string, value: string, isCode = false, color = [0,0,0]) => {
@@ -1008,7 +1043,10 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
                         const img = new Image(); img.src = tc.evidencia;
                         const imgWidth = contentWidth;
                         const imgHeight = (img.height * imgWidth) / img.width;
-                        if (y + imgHeight > pdfHeight - margin) addPageWithHeader('Informe de Observaciones (cont.)');
+                        if (y + imgHeight > pdfHeight - margin) {
+                          pdf.addPage();
+                          y = margin;
+                        }
                         pdf.addImage(tc.evidencia, 'PNG', margin, y, imgWidth, imgHeight, undefined, 'FAST');
                         y += imgHeight + 5;
                     } catch (e) { addTextBox('Error al cargar imagen', {}); }
@@ -1022,6 +1060,40 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
                 pdf.setLineWidth(0.2).line(margin, y, pdfWidth - margin, y);
                 y += 10;
             }
+        }
+
+        // --- LAST PAGE: STATISTICS ---
+        pdf.addPage();
+        y = margin;
+        addTextBox('Estadísticas y Visualización', { fontSize: 18, fontStyle: 'bold' });
+
+        const pieChartEl = document.getElementById('pdf-pie-chart-card');
+        const barChartEl = document.getElementById('pdf-bar-chart-card');
+        
+        if (pieChartEl && barChartEl) {
+          const addChart = async (element: HTMLElement) => {
+              const canvas = await html2canvas(element, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
+              return canvas.toDataURL('image/png', 0.95);
+          };
+          
+          const pieImgData = await addChart(pieChartEl);
+          const barImgData = await addChart(barChartEl);
+
+          const chartWidth = contentWidth / 2 - 5;
+          const pieImg = new Image(); pieImg.src = pieImgData;
+          const barImg = new Image(); barImg.src = barImgData;
+          
+          const pieHeight = (pieImg.height * chartWidth) / pieImg.width;
+          const barHeight = (barImg.height * chartWidth) / barImg.width;
+
+          if (y + Math.max(pieHeight, barHeight) > pdfHeight - margin) {
+            pdf.addPage();
+            y = margin;
+            addTextBox('Estadísticas y Visualización (cont.)', { fontSize: 16, fontStyle: 'bold' });
+          }
+
+          pdf.addImage(pieImgData, 'PNG', margin, y, chartWidth, pieHeight, undefined, 'FAST');
+          pdf.addImage(barImgData, 'PNG', margin + chartWidth + 10, y, chartWidth, barHeight, undefined, 'FAST');
         }
         
         pdf.save(`reporte-observaciones-${format(new Date(), 'yyyy-MM-dd')}.pdf`);

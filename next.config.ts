@@ -1,4 +1,8 @@
 import type {NextConfig} from 'next';
+import { config } from 'dotenv';
+
+// Force loading of .env.local file.
+config({ path: '.env.local' });
 
 // --- TEMPORARY DIAGNOSTIC ---
 // This will help confirm if your .env file is being loaded.

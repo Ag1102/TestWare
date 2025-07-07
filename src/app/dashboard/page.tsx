@@ -141,6 +141,17 @@ const TestwareDashboard: React.FC = () => {
   
   const [isViewerMode, setIsViewerMode] = useState(false);
   const [joinAsViewer, setJoinAsViewer] = useState(false);
+  const inactivityTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleLeaveSession = useCallback(() => {
+    if (inactivityTimerRef.current) {
+      clearTimeout(inactivityTimerRef.current);
+    }
+    setSessionCode(null);
+    setTestCases([]);
+    setInputCode('');
+    setIsViewerMode(false);
+  }, []);
 
   useEffect(() => {
     if (!auth) {
@@ -171,14 +182,14 @@ const TestwareDashboard: React.FC = () => {
           setTestCases(data.testCases || []);
         } else {
           toast({ title: "Error de Sesión", description: "La sesión ya no existe.", variant: "destructive" });
-          setSessionCode(null);
+          handleLeaveSession();
         }
         setIsLoadingSession(false);
       }, (error) => {
         console.error("Error listening to session:", error);
         toast({ title: "Error de Conexión", description: "No se pudo conectar a la sesión.", variant: "destructive" });
         setIsLoadingSession(false);
-        setSessionCode(null);
+        handleLeaveSession();
       });
     }
 
@@ -187,8 +198,33 @@ const TestwareDashboard: React.FC = () => {
         unsubscribe();
       }
     };
-  }, [sessionCode, toast]);
+  }, [sessionCode, toast, handleLeaveSession]);
   
+  // Inactivity timeout effect
+  useEffect(() => {
+    if (!sessionCode) {
+      return;
+    }
+
+    if (inactivityTimerRef.current) {
+      clearTimeout(inactivityTimerRef.current);
+    }
+
+    inactivityTimerRef.current = setTimeout(() => {
+      toast({
+        title: "Sesión cerrada por inactividad",
+        description: "La sesión se cerró automáticamente después de 20 minutos sin cambios.",
+      });
+      handleLeaveSession();
+    }, 20 * 60 * 1000); // 20 minutes
+
+    return () => {
+      if (inactivityTimerRef.current) {
+        clearTimeout(inactivityTimerRef.current);
+      }
+    };
+  }, [testCases, sessionCode, handleLeaveSession, toast]);
+
   const handleLogout = async () => {
     if (auth) {
       await signOut(auth);
@@ -241,13 +277,6 @@ const TestwareDashboard: React.FC = () => {
     } finally {
       setIsLoadingSession(false);
     }
-  };
-
-  const handleLeaveSession = () => {
-    setSessionCode(null);
-    setTestCases([]);
-    setInputCode('');
-    setIsViewerMode(false);
   };
 
   const updateFirestoreTestCases = useCallback(async (updatedCases: TestCase[]) => {

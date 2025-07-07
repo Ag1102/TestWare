@@ -1,5 +1,6 @@
 import { initializeApp, getApp, getApps, type FirebaseApp } from "firebase/app";
 import { getFirestore, type Firestore } from "firebase/firestore";
+import { getAuth, type Auth } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -12,30 +13,32 @@ const firebaseConfig = {
 
 let app: FirebaseApp;
 let db: Firestore | null = null;
+let auth: Auth | null = null;
 
 try {
-  // Check if all required config values are present before initializing
-  if (
-    firebaseConfig.apiKey &&
-    firebaseConfig.authDomain &&
-    firebaseConfig.projectId &&
-    firebaseConfig.storageBucket &&
-    firebaseConfig.messagingSenderId &&
-    firebaseConfig.appId &&
-    // A simple check to ensure placeholders are replaced
-    firebaseConfig.projectId !== "YOUR_PROJECT_ID" 
-  ) {
+  const requiredConfig = [
+    firebaseConfig.apiKey,
+    firebaseConfig.authDomain,
+    firebaseConfig.projectId,
+    firebaseConfig.storageBucket,
+    firebaseConfig.messagingSenderId,
+    firebaseConfig.appId,
+  ];
+  const isConfigured = requiredConfig.every(Boolean) && firebaseConfig.projectId !== "YOUR_PROJECT_ID";
+
+  if (isConfigured) {
     app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
     db = getFirestore(app);
+    auth = getAuth(app);
   } else {
-     // This warning helps diagnose if the .env.local file wasn't filled out.
-    if (typeof window === 'undefined') {
-      console.warn("Firebase configuration not found or is incomplete in .env.local. Real-time collaboration will be disabled.");
+    if (typeof window !== 'undefined') {
+      console.warn("Firebase configuration not found or incomplete in environment variables. Real-time collaboration will be disabled.");
     }
   }
 } catch (e) {
   console.error("Firebase initialization failed:", e);
-  db = null; // Ensure db is null on failure
+  db = null;
+  auth = null;
 }
 
-export { db };
+export { db, auth };

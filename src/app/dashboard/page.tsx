@@ -486,8 +486,12 @@ const TestwareDashboard: React.FC = () => {
                     <DropdownMenuSubTrigger><Bug className="mr-2"/> Informes</DropdownMenuSubTrigger>
                     <DropdownMenuPortal>
                       <DropdownMenuSubContent>
-                         <DialogTrigger asChild><DropdownMenuItem>Informe de Fallos ({failedCases.length})</DropdownMenuItem></DialogTrigger>
-                         <DialogTrigger asChild><DropdownMenuItem>Informe de Observaciones ({commentedCases.length})</DropdownMenuItem></DialogTrigger>
+                         <ImprovementReportDialog commentedCases={commentedCases} allCases={testCases} stats={stats}>
+                          <DropdownMenuItem onSelect={(e) => e.preventDefault()}>Informe de Observaciones ({commentedCases.length})</DropdownMenuItem>
+                         </ImprovementReportDialog>
+                         <FailureReportDialog failedCases={failedCases} allCases={testCases}>
+                           <DropdownMenuItem onSelect={(e) => e.preventDefault()}>Informe de Fallos ({failedCases.length})</DropdownMenuItem>
+                         </FailureReportDialog>
                       </DropdownMenuSubContent>
                     </DropdownMenuPortal>
                   </DropdownMenuSub>
@@ -863,7 +867,7 @@ const InfoField = ({ label, value, preWrap = false }) => (
   </div>
 );
 
-const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCase[] }> = ({ failedCases, allCases }) => {
+const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCase[]; children?: React.ReactNode }> = ({ failedCases, allCases, children }) => {
   const [impactAnalysis, setImpactAnalysis] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
@@ -1098,11 +1102,11 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
     setIsLoading(false);
   }
 
+  const dialogTrigger = children || <Button variant="destructive" disabled={!failedCases.length}><Bug /> Informe de Fallos ({failedCases.length})</Button>;
+
   return (
     <Dialog onOpenChange={(open) => !open && resetDialog()}>
-      <DialogTrigger asChild>
-        <Button variant="destructive" disabled={!failedCases.length}><Bug /> Informe de Fallos ({failedCases.length})</Button>
-      </DialogTrigger>
+      <DialogTrigger asChild>{dialogTrigger}</DialogTrigger>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle>Generar Informe de Fallos en PDF</DialogTitle>
@@ -1176,7 +1180,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
   );
 };
 
-const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: TestCase[]; stats: any }> = ({ commentedCases, allCases, stats }) => {
+const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: TestCase[]; stats: any, children?: React.ReactNode }> = ({ commentedCases, allCases, stats, children }) => {
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
@@ -1398,12 +1402,12 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
     setIsLoading(false);
     setIsDownloadingPdf(false);
   };
+  
+  const dialogTrigger = children || <Button variant="outline" disabled={!commentedCases.length}><Lightbulb /> Informe de Observaciones ({commentedCases.length})</Button>;
 
   return (
     <Dialog onOpenChange={(open) => !open && resetDialog()}>
-      <DialogTrigger asChild>
-        <Button variant="outline" disabled={!commentedCases.length}><Lightbulb /> Informe de Observaciones ({commentedCases.length})</Button>
-      </DialogTrigger>
+      <DialogTrigger asChild>{dialogTrigger}</DialogTrigger>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle>Generar Informe de Observaciones con IA</DialogTitle>

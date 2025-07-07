@@ -34,6 +34,21 @@ import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from "@/lib/utils";
 
+// Helper function to get image dimensions from a data URI
+const getImageDimensions = (dataUri: string): Promise<{ width: number; height: number }> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      resolve({ width: img.width, height: img.height });
+    };
+    img.onerror = (err) => {
+      console.error("Failed to load image for dimension calculation", err);
+      reject(new Error("Failed to load image for dimension calculation"));
+    };
+    img.src = dataUri;
+  });
+};
+
 
 const statusMap: Record<TestCaseStatus, string> = {
   'Passed': 'Aprobado',
@@ -635,12 +650,13 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
             pdf.setFont('helvetica', fontStyle);
             if (isCode) pdf.setFont('courier', 'normal');
             pdf.setFontSize(fontSize).setTextColor(color[0], color[1], color[2]);
+            
             const lines = pdf.splitTextToSize(text || '-', contentWidth);
             const textHeight = (pdf.getLineHeight() / pdf.internal.scaleFactor) * lines.length;
+
             if (y + textHeight > pdfHeight - margin) {
                 pdf.addPage();
                 y = margin;
-                // Simplified header for subsequent pages
                 pdf.setFontSize(10).setTextColor(100);
                 pdf.text('Informe de Hallazgos de QA (cont.)', margin, y);
                 y += 12;
@@ -650,9 +666,9 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         };
 
         // --- PAGE 1: COVER ---
-        let pageCounter = 1;
         const currentDate = new Date();
         const uniqueProcesses = [...new Set(allCases.map(tc => tc.proceso).filter(Boolean))];
+        
         y = 60;
         pdf.setFontSize(32).setFont('helvetica', 'bold').setTextColor(93, 84, 164).text('Informe de Hallazgos de QA', pdfWidth / 2, y, { align: 'center' });
         y += 10;
@@ -671,7 +687,6 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
 
         // --- PAGE 2: SUMMARY ---
         pdf.addPage();
-        pageCounter++;
         y = margin;
         addTextBox('Resumen del Reporte', { fontSize: 18, fontStyle: 'bold' });
         addTextBox(reportDescription, { fontSize: 11 });
@@ -680,7 +695,6 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         // --- PAGE 3: IMPACT ANALYSIS ---
         if (impactAnalysis) {
             pdf.addPage();
-            pageCounter++;
             y = margin;
             addTextBox('Análisis de Impacto General (Generado por IA)', { fontSize: 18, fontStyle: 'bold' });
             addTextBox(impactAnalysis, { fontSize: 11 });
@@ -689,7 +703,6 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         // --- SUBSEQUENT PAGES: FAILED TEST CASES ---
         if (failedCases.length > 0) {
             pdf.addPage();
-            pageCounter++;
             y = margin;
             addTextBox('Detalle de Casos de Prueba Fallidos', { fontSize: 18, fontStyle: 'bold' });
             y += 5;
@@ -697,14 +710,17 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
             for (const tc of failedCases) {
                 const cardStartY = y;
                 
-                // Estimate height
+                // Estimate height to check if a new page is needed
                 let estimatedHeight = 25; // Header
                 const fieldsToEstimate = [tc.descripcion, tc.pasoAPaso, tc.datosPrueba, tc.resultadoEsperado, tc.comentarios];
                 fieldsToEstimate.forEach(field => {
-                  estimatedHeight += (pdf.splitTextToSize(field, contentWidth).length * 5) + 4;
+                  estimatedHeight += (pdf.splitTextToSize(field || '-', contentWidth).length * (pdf.getLineHeight() / pdf.internal.scaleFactor) + 4);
                 })
-                if (tc.evidencia) estimatedHeight += (tc.evidencia.startsWith('data:image') ? 50 : 15);
-
+                if (tc.evidencia && tc.evidencia.startsWith('data:image')) {
+                    estimatedHeight += 50; // Rough estimate for image height
+                } else if (tc.evidencia) {
+                    estimatedHeight += 15;
+                }
 
                 if (y + estimatedHeight > pdfHeight - margin) {
                    pdf.addPage();
@@ -735,7 +751,8 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                     try {
                         const img = new Image();
                         img.src = tc.evidencia;
-                        const imgWidth = contentWidth;
+                        // Using a fixed width for consistency
+                        const imgWidth = contentWidth / 2;
                         const imgHeight = (img.height * imgWidth) / img.width;
                         
                         if (y + imgHeight > pdfHeight - margin) {
@@ -767,19 +784,24 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         
         if (pieChartEl && barChartEl) {
           const addChart = async (element: HTMLElement) => {
-              const canvas = await html2canvas(element, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
-              return canvas.toDataURL('image/png', 0.95);
+              const canvas = await html2canvas(element, { scale: 3, backgroundColor: '#ffffff', useCORS: true });
+              return canvas.toDataURL('image/png', 1.0);
           };
           
           const pieImgData = await addChart(pieChartEl);
           const barImgData = await addChart(barChartEl);
 
           const chartWidth = contentWidth / 2 - 5;
-          const pieImg = new Image(); pieImg.src = pieImgData;
-          const barImg = new Image(); barImg.src = barImgData;
+
+          const pieDimensions = await getImageDimensions(pieImgData);
+          const barDimensions = await getImageDimensions(barImgData);
           
-          const pieHeight = (pieImg.height * chartWidth) / pieImg.width;
-          const barHeight = (barImg.height * chartWidth) / barImg.width;
+          const pieHeight = pieDimensions.width > 0 ? (pieDimensions.height * chartWidth) / pieDimensions.width : 0;
+          const barHeight = barDimensions.width > 0 ? (barDimensions.height * chartWidth) / barDimensions.width : 0;
+
+          if (pieHeight <= 0 || barHeight <= 0) {
+            throw new Error("Failed to calculate chart dimensions. One or more dimensions are zero or invalid.");
+          }
 
           if (y + Math.max(pieHeight, barHeight) > pdfHeight - margin) {
             pdf.addPage();
@@ -927,24 +949,16 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
         const margin = 15;
         const contentWidth = pdfWidth - (margin * 2);
         let y = margin;
-        
-        const addPageWithHeader = (title: string) => {
-            pdf.addPage();
-            y = margin;
-            pdf.setFontSize(10).setTextColor(100);
-            pdf.text(title, margin, y);
-            y += 4;
-            pdf.setLineWidth(0.5).line(margin, y, pdfWidth - margin, y);
-            y += 8;
-        };
 
         const addTextBox = (text: string, options: any = {}) => {
             const { fontSize = 10, fontStyle = 'normal', isCode = false, color = [0, 0, 0] } = options;
             pdf.setFont('helvetica', fontStyle);
             if (isCode) pdf.setFont('courier', 'normal');
             pdf.setFontSize(fontSize).setTextColor(color[0], color[1], color[2]);
+
             const lines = pdf.splitTextToSize(text || '-', contentWidth);
             const textHeight = (pdf.getLineHeight() / pdf.internal.scaleFactor) * lines.length;
+
             if (y + textHeight > pdfHeight - margin) {
                 pdf.addPage();
                 y = margin;
@@ -959,6 +973,7 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
         // --- PAGE 1: COVER ---
         const currentDate = new Date();
         const uniqueProcesses = [...new Set(allCases.map(tc => tc.proceso).filter(Boolean))];
+        
         y = 60;
         pdf.setFontSize(32).setFont('helvetica', 'bold').setTextColor(93, 84, 164).text('Informe de Observaciones', pdfWidth / 2, y, { align: 'center' });
         y += 10;
@@ -1006,7 +1021,7 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
                 let estimatedHeight = 25; // Header
                 const fieldsToEstimate = [tc.descripcion, tc.pasoAPaso, tc.datosPrueba, tc.resultadoEsperado, tc.comentarios];
                 fieldsToEstimate.forEach(field => {
-                  estimatedHeight += (pdf.splitTextToSize(field, contentWidth).length * 5) + 4;
+                  estimatedHeight += (pdf.splitTextToSize(field || '-', contentWidth).length * (pdf.getLineHeight() / pdf.internal.scaleFactor) + 4);
                 })
                 if (tc.evidencia) estimatedHeight += (tc.evidencia.startsWith('data:image') ? 50 : 15);
 
@@ -1016,11 +1031,10 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
                     addTextBox('Detalle de Casos de Prueba Comentados (cont.)', { fontSize: 16, fontStyle: 'bold' });
                     y += 5;
                 }
-
-                pdf.setFont('helvetica', 'bold').setFontSize(12).setTextColor(51, 51, 51);
+                const startYForStatus = y;
                 addTextBox(`CASO: ${tc.casoPrueba} — ${tc.proceso}`, { fontSize: 12, fontStyle: 'bold' });
                 pdf.setFont('helvetica', 'bold').setFontSize(10).setTextColor(statusColor);
-                pdf.text(`[${statusMap[tc.estado]}]`, pdfWidth - margin, y - 5, { align: 'right' }); 
+                pdf.text(`[${statusMap[tc.estado]}]`, pdfWidth - margin, startYForStatus + 4, { align: 'right' }); 
                 y += 2;
                 
                 const renderField = (label: string, value: string, isCode = false, color = [0,0,0]) => {
@@ -1041,7 +1055,7 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
                 if (tc.evidencia && tc.evidencia.startsWith('data:image')) {
                     try {
                         const img = new Image(); img.src = tc.evidencia;
-                        const imgWidth = contentWidth;
+                        const imgWidth = contentWidth / 2;
                         const imgHeight = (img.height * imgWidth) / img.width;
                         if (y + imgHeight > pdfHeight - margin) {
                           pdf.addPage();
@@ -1072,19 +1086,24 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
         
         if (pieChartEl && barChartEl) {
           const addChart = async (element: HTMLElement) => {
-              const canvas = await html2canvas(element, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
-              return canvas.toDataURL('image/png', 0.95);
+              const canvas = await html2canvas(element, { scale: 3, backgroundColor: '#ffffff', useCORS: true });
+              return canvas.toDataURL('image/png', 1.0);
           };
           
           const pieImgData = await addChart(pieChartEl);
           const barImgData = await addChart(barChartEl);
 
           const chartWidth = contentWidth / 2 - 5;
-          const pieImg = new Image(); pieImg.src = pieImgData;
-          const barImg = new Image(); barImg.src = barImgData;
           
-          const pieHeight = (pieImg.height * chartWidth) / pieImg.width;
-          const barHeight = (barImg.height * chartWidth) / barImg.width;
+          const pieDimensions = await getImageDimensions(pieImgData);
+          const barDimensions = await getImageDimensions(barImgData);
+
+          const pieHeight = pieDimensions.width > 0 ? (pieDimensions.height * chartWidth) / pieDimensions.width : 0;
+          const barHeight = barDimensions.width > 0 ? (barDimensions.height * chartWidth) / barDimensions.width : 0;
+
+          if (pieHeight <= 0 || barHeight <= 0) {
+            throw new Error("Failed to calculate chart dimensions. One or more dimensions are zero or invalid.");
+          }
 
           if (y + Math.max(pieHeight, barHeight) > pdfHeight - margin) {
             pdf.addPage();

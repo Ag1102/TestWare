@@ -11,6 +11,8 @@ export interface TestCase {
   evidencia: string;
   comentarios: string;
   estado: TestCaseStatus;
+  updatedBy?: string;
+  updatedAt?: any;
 }
 
 // This type aligns with the stricter schema expected by the Genkit AI flow.
@@ -25,3 +27,4 @@ export interface AITestCase {
   comentarios: string;
   estado: 'Fallido';
 }
+

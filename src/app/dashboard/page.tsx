@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/chart"
 import type { ChartConfig } from "@/components/ui/chart";
 
-import { AITestCase, TestCase, TestCaseStatus } from '@/lib/types';
+import { TestCase, TestCaseStatus } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -26,9 +26,11 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { useToast } from "@/hooks/use-toast";
 import { generateReportAction, generateImprovementReportAction } from '@/app/actions';
-import { Upload, Download, Trash2, Bug, Lightbulb, Loader2, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter, PieChart as PieChartIcon, LogIn, PlusCircle, Copy, LogOut, Share2, User as UserIcon } from 'lucide-react';
+import { Upload, Download, Trash2, Bug, Lightbulb, Loader2, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter, PieChart as PieChartIcon, LogIn, PlusCircle, Copy, LogOut, Share2, User as UserIcon, Power, PanelLeft } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
@@ -123,6 +125,7 @@ const TestwareDashboard: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (!auth) {
@@ -290,7 +293,18 @@ const TestwareDashboard: React.FC = () => {
   };
 
   const handleUpdate = useCallback((id: string, field: keyof TestCase, value: string | TestCaseStatus) => {
-    const updatedCases = testCases.map(tc => tc.id === id ? { ...tc, [field]: value } : tc);
+    const updatedCases = testCases.map(tc => {
+        if (tc.id === id) {
+            const newTc = { ...tc, [field]: value };
+            if (field === 'estado') {
+                newTc.updatedBy = user?.email || 'System';
+                newTc.updatedAt = new Date();
+            }
+            return newTc;
+        }
+        return tc;
+    });
+
     const testCaseToUpdate = updatedCases.find(tc => tc.id === id);
   
     if (field === 'estado' && value === 'Failed' && testCaseToUpdate) {
@@ -303,7 +317,7 @@ const TestwareDashboard: React.FC = () => {
       }
     }
     updateFirestoreTestCases(updatedCases);
-  }, [testCases, toast, updateFirestoreTestCases]);
+  }, [testCases, toast, updateFirestoreTestCases, user]);
   
   const handleDeleteTestCase = useCallback((id: string) => {
     const updatedCases = testCases.filter(tc => tc.id !== id);
@@ -346,11 +360,11 @@ const TestwareDashboard: React.FC = () => {
                     <UserIcon className="h-4 w-4" />
                     <span>{user?.email}</span>
                   </div>
-                  <Button variant="outline" onClick={handleLogout}><LogOut /> Cerrar Sesión</Button>
+                  <Button variant="outline" onClick={handleLogout}><Power /> Cerrar Sesión</Button>
               </div>
             </div>
           </header>
-          <main className="flex-1 flex flex-col items-center justify-center">
+          <main className="flex-1 flex flex-col items-center justify-center p-4">
             <Card className="w-full max-w-md p-8 shadow-2xl">
               <CardHeader className="text-center p-0 mb-6">
                 <CardTitle className="text-2xl">Colaboración en Tiempo Real</CardTitle>
@@ -394,34 +408,81 @@ const TestwareDashboard: React.FC = () => {
 
   return (
     <div className="flex min-h-screen bg-background text-foreground font-body">
-      <Sidebar 
-        stats={stats}
-        processes={processes}
-        filterProcess={filterProcess}
-        setFilterProcess={setFilterProcess}
-        filterStatus={filterStatus}
-        setFilterStatus={setFilterStatus}
-      />
+      <div className="hidden md:block">
+        <Sidebar 
+          stats={stats}
+          processes={processes}
+          filterProcess={filterProcess}
+          setFilterProcess={setFilterProcess}
+          filterStatus={filterStatus}
+          setFilterStatus={setFilterStatus}
+        />
+      </div>
+       <Sheet open={isMobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+        <SheetContent side="left" className="p-0 w-80">
+          <Sidebar 
+            stats={stats}
+            processes={processes}
+            filterProcess={filterProcess}
+            setFilterProcess={setFilterProcess}
+            filterStatus={filterStatus}
+            setFilterStatus={setFilterStatus}
+          />
+        </SheetContent>
+      </Sheet>
+
       <div className="flex-1 flex flex-col">
         <header className="sticky top-0 z-10 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="container flex h-16 items-center justify-between">
             <div className="flex gap-2 items-center">
-              <TestwareLogo/>
-              <h1 className="text-2xl font-bold tracking-tight font-headline">TESTWARE</h1>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="md:hidden"
+                  onClick={() => setMobileSidebarOpen(true)}
+                >
+                  <PanelLeft />
+                  <span className="sr-only">Toggle Menu</span>
+                </Button>
+              <TestwareLogo className="hidden sm:block"/>
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight font-headline">TESTWARE</h1>
             </div>
-            <div className="flex items-center justify-end space-x-2">
+            <div className="flex items-center justify-end space-x-1 md:space-x-2">
               <div className="flex items-center gap-2 bg-muted p-2 rounded-lg">
-                <span className="text-sm font-semibold text-muted-foreground">SESIÓN:</span>
+                <span className="hidden sm:inline text-sm font-semibold text-muted-foreground">SESIÓN:</span>
                 <span className="font-mono font-bold text-primary">{sessionCode}</span>
                 <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCopyCode}><Copy className="h-4 w-4"/></Button>
               </div>
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".json" className="hidden" id="json-upload" />
-              <Button variant="outline" onClick={() => fileInputRef.current?.click()}><Upload /> Cargar JSON</Button>
-              <ImprovementReportDialog commentedCases={commentedCases} allCases={testCases} stats={stats}/>
-              <FailureReportDialog failedCases={failedCases} allCases={testCases} />
-              <Button variant="destructive" onClick={handleClearData} disabled={!testCases.length}><Trash2 /> Limpiar Todo</Button>
-              <Button variant="outline" onClick={handleLeaveSession}><LogOut /> Salir de Sesión</Button>
-              <Button variant="outline" onClick={handleLogout}><LogOut /> Cerrar Sesión</Button>
+              <div className="hidden sm:flex items-center space-x-2">
+                <Button variant="outline" onClick={() => fileInputRef.current?.click()}><Upload /> Cargar JSON</Button>
+                <ImprovementReportDialog commentedCases={commentedCases} allCases={testCases} stats={stats}/>
+                <FailureReportDialog failedCases={failedCases} allCases={testCases} />
+                <ClearAllConfirmationDialog onConfirm={handleClearData} disabled={!testCases.length} />
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon">
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem className="sm:hidden" onClick={() => fileInputRef.current?.click()}><Upload className="mr-2"/> Cargar JSON</DropdownMenuItem>
+                  <DropdownMenuSub className="sm:hidden">
+                    <DropdownMenuSubTrigger><Bug className="mr-2"/> Informes</DropdownMenuSubTrigger>
+                    <DropdownMenuPortal>
+                      <DropdownMenuSubContent>
+                         <DialogTrigger asChild><DropdownMenuItem>Informe de Fallos ({failedCases.length})</DropdownMenuItem></DialogTrigger>
+                         <DialogTrigger asChild><DropdownMenuItem>Informe de Observaciones ({commentedCases.length})</DropdownMenuItem></DialogTrigger>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuPortal>
+                  </DropdownMenuSub>
+                  <DropdownMenuItem className="sm:hidden" onClick={handleClearData}><Trash2 className="mr-2"/> Limpiar Todo</DropdownMenuItem>
+                  <DropdownMenuSeparator className="sm:hidden"/>
+                  <DropdownMenuItem onClick={handleLeaveSession}><LogOut /> Terminar Sesión</DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleLogout}><Power /> Cerrar Sesión</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </header>
@@ -457,6 +518,27 @@ const TestwareDashboard: React.FC = () => {
   );
 };
 
+const ClearAllConfirmationDialog = ({ onConfirm, disabled }) => (
+  <AlertDialog>
+    <AlertDialogTrigger asChild>
+      <Button variant="destructive" disabled={disabled}><Trash2 /> Limpiar Todo</Button>
+    </AlertDialogTrigger>
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>¿Estás absolutamente seguro?</AlertDialogTitle>
+        <AlertDialogDescription>
+          Esta acción no se puede deshacer. Esto eliminará permanentemente todos los casos de prueba de la sesión actual.
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+        <AlertDialogAction onClick={onConfirm}>Sí, limpiar todo</AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
+);
+
+
 const Sidebar = ({ stats, processes, filterProcess, setFilterProcess, filterStatus, setFilterStatus }) => {
     const chartData = useMemo(() => [
         { name: 'Aprobados', value: stats.passed, fill: 'hsl(var(--chart-1))' },
@@ -488,7 +570,7 @@ const Sidebar = ({ stats, processes, filterProcess, setFilterProcess, filterStat
     } satisfies ChartConfig
 
     return (
-      <aside className="w-80 bg-card border-r p-6 space-y-8 sticky top-0 h-screen overflow-y-auto">
+      <aside className="w-full h-full md:w-80 bg-card border-r p-6 space-y-8 md:sticky top-0 md:h-screen overflow-y-auto">
         <div>
             <h2 className="text-lg font-semibold tracking-tight">Panel de Control</h2>
             <div className="mt-4 space-y-2">
@@ -634,15 +716,33 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCas
     }
     reader.readAsDataURL(file);
   };
+  
+  const formatTimestamp = (timestamp: any) => {
+    if (!timestamp) return '';
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    try {
+      return format(date, 'Pp', { locale: es });
+    } catch (error) {
+      return 'Fecha inválida';
+    }
+  };
 
   return (
     <Card className="overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300">
-      <CardHeader className="flex flex-row items-center justify-between bg-card p-4 border-b">
-        <div className="flex flex-col">
+      <CardHeader className="flex flex-row items-start justify-between bg-card p-4 border-b">
+        <div className="flex-grow pr-4">
           <CardTitle className="font-headline text-lg tracking-tight">{testCase.proceso}</CardTitle>
           <p className="font-mono text-sm text-muted-foreground mt-1">{testCase.casoPrueba}</p>
+           {testCase.updatedBy && testCase.updatedAt && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-2">
+              <UserIcon className="h-3 w-3" />
+              <p>
+                Actualizado por <strong>{testCase.updatedBy}</strong>
+              </p>
+            </div>
+          )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
             <Select
               value={testCase.estado}
               onValueChange={(value) => onUpdate(testCase.id, 'estado', value as TestCaseStatus)}
@@ -662,9 +762,25 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCas
                   ))}
               </SelectContent>
             </Select>
-            <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => onDelete(testCase.id)}>
-              <Trash2 className="h-4 w-4" />
-            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive">
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Esta acción no se puede deshacer. Esto eliminará permanentemente el caso de prueba.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => onDelete(testCase.id)}>Eliminar</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
         </div>
       </CardHeader>
       <CardContent className="p-6 space-y-6">
@@ -752,7 +868,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
     }
     setIsLoading(true);
     setImpactAnalysis(null);
-    const aiCases: AITestCase[] = failedCases.map(({ id, ...rest }) => ({ ...rest, estado: 'Fallido' }));
+    const aiCases = failedCases.map(({ id, ...rest }) => ({ ...rest, estado: 'Fallido' }));
     
     try {
       const result = await generateReportAction({ failedTestCases: aiCases, reportDescription });
@@ -1349,3 +1465,4 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
 
 
 export default TestwareDashboard;
+

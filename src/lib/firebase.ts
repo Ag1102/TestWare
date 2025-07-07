@@ -17,7 +17,13 @@ let db: Firestore | null = null;
 
 // This check allows the app to run without a Firebase config for local development or testing,
 // although real-time features will be disabled.
-const areCredsSet = firebaseConfig.apiKey && firebaseConfig.projectId;
+const areCredsSet = 
+    firebaseConfig.apiKey &&
+    firebaseConfig.authDomain &&
+    firebaseConfig.projectId &&
+    firebaseConfig.storageBucket &&
+    firebaseConfig.messagingSenderId &&
+    firebaseConfig.appId;
 
 if (areCredsSet) {
   try {

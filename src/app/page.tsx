@@ -27,14 +27,16 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { useToast } from "@/hooks/use-toast";
 import { generateReportAction, generateImprovementReportAction } from '@/app/actions';
-import { Upload, Download, Trash2, FileText, Loader2, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter, PieChart as PieChartIcon, Search, Bug, ClipboardList, Lightbulb } from 'lucide-react';
+import { Upload, Download, Trash2, Bug, Lightbulb, Loader2, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter, PieChart as PieChartIcon, LogIn, PlusCircle, Copy, LogOut, Share2 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from "@/lib/utils";
+import { db } from "@/lib/firebase";
+import { doc, setDoc, getDoc, onSnapshot, updateDoc, type Unsubscribe } from "firebase/firestore";
 
-// Helper function to get image dimensions from a data URI
+
 const getImageDimensions = (dataUri: string): Promise<{ width: number; height: number }> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -90,92 +92,133 @@ const TestwareLogo = ({ className }: { className?: string }) => (
     </svg>
 );
 
-
-// A simple polyfill for crypto.randomUUID() for broader browser compatibility
 const simpleUUID = () => {
-  // A basic UUID v4 generator
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
     var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
 };
 
+const generateSessionCode = () => {
+  const chars = 'ABCDEFGHIJKLMNPQRSTUVWXYZ123456789';
+  let result = '';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+};
 
 const TestwareDashboard: React.FC = () => {
+  const [sessionCode, setSessionCode] = useState<string | null>(null);
+  const [inputCode, setInputCode] = useState('');
+  const [isLoadingSession, setIsLoadingSession] = useState(false);
   const [testCases, setTestCases] = useState<TestCase[]>([]);
-  const [isLoadingCases, setIsLoadingCases] = useState(true);
   const [filterProcess, setFilterProcess] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
-  const syncWithServer = useCallback(async (updatedCases: TestCase[]) => {
-    try {
-      await fetch('/api/test-cases', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedCases),
-      });
-    } catch (error) {
-      console.error("Failed to sync with server:", error);
-      toast({
-        title: "Error de Sincronización",
-        description: "No se pudieron guardar los cambios en el servidor.",
-        variant: "destructive"
+  useEffect(() => {
+    let unsubscribe: Unsubscribe | undefined;
+
+    if (db && sessionCode) {
+      setIsLoadingSession(true);
+      const sessionDocRef = doc(db, "sessions", sessionCode);
+
+      unsubscribe = onSnapshot(sessionDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setTestCases(data.testCases || []);
+        } else {
+          toast({ title: "Error de Sesión", description: "La sesión ya no existe.", variant: "destructive" });
+          setSessionCode(null);
+        }
+        setIsLoadingSession(false);
+      }, (error) => {
+        console.error("Error listening to session:", error);
+        toast({ title: "Error de Conexión", description: "No se pudo conectar a la sesión.", variant: "destructive" });
+        setIsLoadingSession(false);
+        setSessionCode(null);
       });
     }
-  }, [toast]);
 
-  // Effect for initial data load
-  useEffect(() => {
-    const fetchTestCases = async () => {
-      try {
-        setIsLoadingCases(true);
-        const response = await fetch('/api/test-cases');
-        const data = await response.json();
-        setTestCases(data);
-      } catch (error) {
-        console.error("Failed to fetch test cases:", error);
-        toast({
-          title: "Error de Carga",
-          description: "No se pudieron cargar los casos de prueba del servidor.",
-          variant: "destructive"
-        });
-      } finally {
-        setIsLoadingCases(false);
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
       }
     };
-    fetchTestCases();
-  }, [toast]);
+  }, [sessionCode, toast]);
 
-  // Effect for polling for real-time updates
-  useEffect(() => {
-    const intervalId = setInterval(async () => {
-        try {
-            const response = await fetch('/api/test-cases');
-            const data = await response.json();
-            // Use functional update to avoid stale state and compare
-            setTestCases(currentCases => {
-                if (JSON.stringify(data) !== JSON.stringify(currentCases)) {
-                    return data; // Update state only if data is different
-                }
-                return currentCases;
-            });
-        } catch (e) {
-            // Silently ignore polling errors in the background
-            console.error("Polling error:", e)
-        }
-    }, 2000); // Poll every 2 seconds
+  const handleCreateSession = async () => {
+    if (!db) {
+      toast({ title: "Firebase no configurado", description: "Por favor, configura tus credenciales de Firebase.", variant: "destructive" });
+      return;
+    }
+    setIsLoadingSession(true);
+    const newCode = generateSessionCode();
+    try {
+      const sessionDocRef = doc(db, "sessions", newCode);
+      await setDoc(sessionDocRef, { testCases: [], createdAt: new Date() });
+      setSessionCode(newCode);
+      toast({ title: "Sesión Creada", description: `El código es: ${newCode}` });
+    } catch (error) {
+      console.error("Error creating session:", error);
+      toast({ title: "Error al crear sesión", variant: "destructive" });
+    } finally {
+      setIsLoadingSession(false);
+    }
+  };
 
-    return () => clearInterval(intervalId); // Cleanup on component unmount
-  }, []);
+  const handleJoinSession = async () => {
+    if (!db) {
+      toast({ title: "Firebase no configurado", variant: "destructive" });
+      return;
+    }
+    if (!inputCode.trim()) {
+      toast({ title: "Código requerido", description: "Por favor, ingresa un código de sesión.", variant: "destructive" });
+      return;
+    }
+    setIsLoadingSession(true);
+    try {
+      const sessionDocRef = doc(db, "sessions", inputCode.trim().toUpperCase());
+      const docSnap = await getDoc(sessionDocRef);
+      if (docSnap.exists()) {
+        setSessionCode(inputCode.trim().toUpperCase());
+      } else {
+        toast({ title: "Sesión no encontrada", description: "El código ingresado no es válido.", variant: "destructive" });
+      }
+    } catch (error) {
+      console.error("Error joining session:", error);
+      toast({ title: "Error al unirse a la sesión", variant: "destructive" });
+    } finally {
+      setIsLoadingSession(false);
+    }
+  };
+
+  const handleLeaveSession = () => {
+    setSessionCode(null);
+    setTestCases([]);
+    setInputCode('');
+  };
+
+  const updateFirestoreTestCases = useCallback(async (updatedCases: TestCase[]) => {
+    if (db && sessionCode) {
+      try {
+        const sessionDocRef = doc(db, "sessions", sessionCode);
+        await updateDoc(sessionDocRef, { testCases: updatedCases });
+      } catch (error) {
+        console.error("Failed to sync with Firestore:", error);
+        toast({ title: "Error de Sincronización", description: "No se pudieron guardar los cambios.", variant: "destructive" });
+      }
+    }
+  }, [sessionCode, toast]);
 
   const processes = useMemo(() => ['all', ...Array.from(new Set(testCases.map(tc => tc.proceso))).filter(Boolean)], [testCases]);
   const failedCases = useMemo(() => testCases.filter(tc => tc.estado === 'Failed'), [testCases]);
   const commentedCases = useMemo(() => testCases.filter(tc => tc.comentarios?.trim()), [testCases]);
 
   const filteredCases = useMemo(() => {
-    return testCases.filter(tc => 
+    return testCases.filter(tc =>
       (filterProcess === 'all' || tc.proceso === filterProcess) &&
       (filterStatus === 'all' || tc.estado === filterStatus)
     );
@@ -200,7 +243,6 @@ const TestwareDashboard: React.FC = () => {
     reader.onload = (event) => {
       try {
         const json = JSON.parse(event.target?.result as string);
-        // Use a function that works across all browsers
         const newCases = json.map((c: any) => ({
             ...c,
             id: simpleUUID(),
@@ -208,8 +250,7 @@ const TestwareDashboard: React.FC = () => {
         }));
         
         const updatedCases = [...testCases, ...newCases];
-        setTestCases(updatedCases);
-        syncWithServer(updatedCases);
+        updateFirestoreTestCases(updatedCases);
         toast({ title: "Éxito", description: `${json.length} casos de prueba cargados.` });
       } catch (error) {
         console.error("Failed to parse or upload JSON", error);
@@ -219,14 +260,13 @@ const TestwareDashboard: React.FC = () => {
     reader.readAsText(file);
     if(fileInputRef.current) fileInputRef.current.value = "";
   };
-  
+
   const handleUpdate = useCallback((id: string, field: keyof TestCase, value: string | TestCaseStatus) => {
-    const testCaseToUpdate = testCases.find(tc => tc.id === id);
-    if (!testCaseToUpdate) return;
+    const updatedCases = testCases.map(tc => tc.id === id ? { ...tc, [field]: value } : tc);
+    const testCaseToUpdate = updatedCases.find(tc => tc.id === id);
   
-    if (field === 'estado' && value === 'Failed') {
-      const updatedTestCase = { ...testCaseToUpdate, [field]: value };
-      if (!updatedTestCase.comentarios?.trim() || !updatedTestCase.evidencia?.trim()) {
+    if (field === 'estado' && value === 'Failed' && testCaseToUpdate) {
+      if (!testCaseToUpdate.comentarios?.trim() || !testCaseToUpdate.evidencia?.trim()) {
         toast({
           title: "Información Requerida",
           description: "Comentarios y Evidencia son requeridos para marcar como Fallido.",
@@ -234,26 +274,79 @@ const TestwareDashboard: React.FC = () => {
         });
       }
     }
-    
-    const updatedCases = testCases.map(tc => 
-      tc.id === id ? { ...tc, [field]: value } : tc
-    );
-    setTestCases(updatedCases);
-    syncWithServer(updatedCases);
-  }, [testCases, toast, syncWithServer]);
+    updateFirestoreTestCases(updatedCases);
+  }, [testCases, toast, updateFirestoreTestCases]);
   
   const handleDeleteTestCase = useCallback((id: string) => {
     const updatedCases = testCases.filter(tc => tc.id !== id);
-    setTestCases(updatedCases);
-    syncWithServer(updatedCases);
+    updateFirestoreTestCases(updatedCases);
     toast({ title: "Caso de prueba eliminado", variant: "destructive" });
-  }, [testCases, toast, syncWithServer]);
+  }, [testCases, toast, updateFirestoreTestCases]);
 
   const handleClearData = () => {
-    setTestCases([]);
-    syncWithServer([]);
+    updateFirestoreTestCases([]);
     toast({ title: "Datos eliminados", description: "Todos los casos de prueba han sido eliminados.", variant: "destructive" });
   };
+  
+  const handleCopyCode = () => {
+    if (sessionCode) {
+      navigator.clipboard.writeText(sessionCode);
+      toast({ title: "Copiado", description: "Código de sesión copiado al portapapeles." });
+    }
+  };
+
+  if (!sessionCode) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground font-body">
+        <div className="flex gap-2 items-center mb-8">
+            <TestwareLogo className="h-10 w-10"/>
+            <h1 className="text-4xl font-bold tracking-tight font-headline">TESTWARE</h1>
+        </div>
+        <Card className="w-full max-w-md p-8 shadow-2xl">
+          <CardHeader className="text-center p-0 mb-6">
+            <CardTitle className="text-2xl">Colaboración en Tiempo Real</CardTitle>
+            <CardDescription>Crea una sesión para empezar o únete a una existente con un código.</CardDescription>
+          </CardHeader>
+          <CardContent className="p-0 space-y-6">
+            <div className="space-y-4">
+              <Label htmlFor="session-code" className="font-semibold">Unirse a una Sesión</Label>
+              <div className="flex gap-2">
+                <Input 
+                  id="session-code"
+                  placeholder="Ingresa el código"
+                  value={inputCode}
+                  onChange={(e) => setInputCode(e.target.value)}
+                  className="text-center tracking-widest font-mono"
+                  maxLength={6}
+                />
+                <Button onClick={handleJoinSession} disabled={isLoadingSession} className="w-1/3">
+                  {isLoadingSession ? <Loader2 className="animate-spin" /> : <LogIn />}
+                  Unirse
+                </Button>
+              </div>
+            </div>
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-card px-2 text-muted-foreground">O</span>
+              </div>
+            </div>
+            <Button onClick={handleCreateSession} disabled={isLoadingSession} variant="outline" className="w-full">
+              <PlusCircle /> Crear Nueva Sesión
+            </Button>
+          </CardContent>
+        </Card>
+        {!db && (
+          <div className="mt-8 text-center text-red-500 max-w-md">
+            <p className="font-bold">Error de Configuración de Firebase</p>
+            <p className="text-sm">Las funciones de colaboración en tiempo real están desactivadas. Por favor, asegúrate de que tus variables de entorno de Firebase estén configuradas correctamente en el archivo `.env`.</p>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-background text-foreground font-body">
@@ -273,25 +366,32 @@ const TestwareDashboard: React.FC = () => {
               <h1 className="text-2xl font-bold tracking-tight font-headline">TESTWARE</h1>
             </div>
             <div className="flex items-center justify-end space-x-2">
+              <div className="flex items-center gap-2 bg-muted p-2 rounded-lg">
+                <span className="text-sm font-semibold text-muted-foreground">SESIÓN:</span>
+                <span className="font-mono font-bold text-primary">{sessionCode}</span>
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCopyCode}><Copy className="h-4 w-4"/></Button>
+              </div>
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".json" className="hidden" id="json-upload" />
               <Button variant="outline" onClick={() => fileInputRef.current?.click()}><Upload /> Cargar JSON</Button>
               <ImprovementReportDialog commentedCases={commentedCases} allCases={testCases} stats={stats}/>
               <FailureReportDialog failedCases={failedCases} allCases={testCases} />
               <Button variant="destructive" onClick={handleClearData} disabled={!testCases.length}><Trash2 /> Limpiar Todo</Button>
+              <Button variant="outline" onClick={handleLeaveSession}><LogOut /> Salir</Button>
             </div>
           </div>
         </header>
 
         <main className="flex-1 container mx-auto p-4 md:p-6 lg:p-8">
-          {isLoadingCases ? (
+          {isLoadingSession ? (
              <div className="flex justify-center items-center py-20">
                 <Loader2 className="h-8 w-8 animate-spin" />
-                <p className="ml-4">Cargando casos de prueba...</p>
+                <p className="ml-4">Cargando sesión...</p>
              </div>
           ) : !testCases.length ? (
               <div className="text-center py-20">
-                <h2 className="text-2xl font-semibold">Bienvenido a TESTWARE</h2>
-                <p className="text-muted-foreground mt-2">Carga un archivo JSON para empezar con tus casos de prueba.</p>
+                <Share2 className="mx-auto h-12 w-12 text-muted-foreground" />
+                <h2 className="text-2xl font-semibold mt-4">Sesión Lista para Colaborar</h2>
+                <p className="text-muted-foreground mt-2">Carga un archivo JSON o comparte el código de la sesión para empezar.</p>
                 <Button onClick={() => fileInputRef.current?.click()} className="mt-6 bg-primary hover:bg-primary/90">
                   <Upload className="mr-2" /> Carga tu primer archivo
                 </Button>
@@ -710,14 +810,13 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
             for (const tc of failedCases) {
                 const cardStartY = y;
                 
-                // Estimate height to check if a new page is needed
-                let estimatedHeight = 25; // Header
+                let estimatedHeight = 25;
                 const fieldsToEstimate = [tc.descripcion, tc.pasoAPaso, tc.datosPrueba, tc.resultadoEsperado, tc.comentarios];
                 fieldsToEstimate.forEach(field => {
                   estimatedHeight += (pdf.splitTextToSize(field || '-', contentWidth).length * (pdf.getLineHeight() / pdf.internal.scaleFactor) + 4);
                 })
                 if (tc.evidencia && tc.evidencia.startsWith('data:image')) {
-                    estimatedHeight += 50; // Rough estimate for image height
+                    estimatedHeight += 50;
                 } else if (tc.evidencia) {
                     estimatedHeight += 15;
                 }
@@ -729,7 +828,6 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                    y += 5;
                 }
 
-                // Card Header
                 const headerText = `CASO: ${tc.casoPrueba} — ${tc.proceso}`;
                 addTextBox(headerText, { fontSize: 12, fontStyle: 'bold' });
                 y += 2;
@@ -749,11 +847,9 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                 addTextBox('Evidencia:', { fontSize: 10, fontStyle: 'bold' });
                 if (tc.evidencia && tc.evidencia.startsWith('data:image')) {
                     try {
-                        const img = new Image();
-                        img.src = tc.evidencia;
-                        // Using a fixed width for consistency
+                        const { width, height } = await getImageDimensions(tc.evidencia);
                         const imgWidth = contentWidth / 2;
-                        const imgHeight = (img.height * imgWidth) / img.width;
+                        const imgHeight = (height * imgWidth) / width;
                         
                         if (y + imgHeight > pdfHeight - margin) {
                           pdf.addPage();
@@ -799,18 +895,16 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
           const pieHeight = pieDimensions.width > 0 ? (pieDimensions.height * chartWidth) / pieDimensions.width : 0;
           const barHeight = barDimensions.width > 0 ? (barDimensions.height * chartWidth) / barDimensions.width : 0;
 
-          if (pieHeight <= 0 || barHeight <= 0) {
-            throw new Error("Failed to calculate chart dimensions. One or more dimensions are zero or invalid.");
-          }
+          if (pieHeight > 0 && barHeight > 0) {
+              if (y + Math.max(pieHeight, barHeight) > pdfHeight - margin) {
+                pdf.addPage();
+                y = margin;
+                addTextBox('Estadísticas y Visualización (cont.)', { fontSize: 16, fontStyle: 'bold' });
+              }
 
-          if (y + Math.max(pieHeight, barHeight) > pdfHeight - margin) {
-            pdf.addPage();
-            y = margin;
-            addTextBox('Estadísticas y Visualización (cont.)', { fontSize: 16, fontStyle: 'bold' });
+              pdf.addImage(pieImgData, 'PNG', margin, y, chartWidth, pieHeight, undefined, 'FAST');
+              pdf.addImage(barImgData, 'PNG', margin + chartWidth + 10, y, chartWidth, barHeight, undefined, 'FAST');
           }
-
-          pdf.addImage(pieImgData, 'PNG', margin, y, chartWidth, pieHeight, undefined, 'FAST');
-          pdf.addImage(barImgData, 'PNG', margin + chartWidth + 10, y, chartWidth, barHeight, undefined, 'FAST');
         }
 
         pdf.save(`reporte-fallos-${format(new Date(), 'yyyy-MM-dd')}.pdf`);
@@ -1018,7 +1112,7 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
             for (const tc of commentedCases) {
                 const statusColor = tc.estado === 'Failed' ? '#e53935' : tc.estado === 'Passed' ? '#43a047' : '#757575';
                 
-                let estimatedHeight = 25; // Header
+                let estimatedHeight = 25;
                 const fieldsToEstimate = [tc.descripcion, tc.pasoAPaso, tc.datosPrueba, tc.resultadoEsperado, tc.comentarios];
                 fieldsToEstimate.forEach(field => {
                   estimatedHeight += (pdf.splitTextToSize(field || '-', contentWidth).length * (pdf.getLineHeight() / pdf.internal.scaleFactor) + 4);
@@ -1054,9 +1148,9 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
                 addTextBox('Evidencia:', { fontSize: 10, fontStyle: 'bold' });
                 if (tc.evidencia && tc.evidencia.startsWith('data:image')) {
                     try {
-                        const img = new Image(); img.src = tc.evidencia;
+                        const { width, height } = await getImageDimensions(tc.evidencia);
                         const imgWidth = contentWidth / 2;
-                        const imgHeight = (img.height * imgWidth) / img.width;
+                        const imgHeight = (height * imgWidth) / width;
                         if (y + imgHeight > pdfHeight - margin) {
                           pdf.addPage();
                           y = margin;
@@ -1101,18 +1195,16 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
           const pieHeight = pieDimensions.width > 0 ? (pieDimensions.height * chartWidth) / pieDimensions.width : 0;
           const barHeight = barDimensions.width > 0 ? (barDimensions.height * chartWidth) / barDimensions.width : 0;
 
-          if (pieHeight <= 0 || barHeight <= 0) {
-            throw new Error("Failed to calculate chart dimensions. One or more dimensions are zero or invalid.");
-          }
+          if (pieHeight > 0 && barHeight > 0) {
+            if (y + Math.max(pieHeight, barHeight) > pdfHeight - margin) {
+              pdf.addPage();
+              y = margin;
+              addTextBox('Estadísticas y Visualización (cont.)', { fontSize: 16, fontStyle: 'bold' });
+            }
 
-          if (y + Math.max(pieHeight, barHeight) > pdfHeight - margin) {
-            pdf.addPage();
-            y = margin;
-            addTextBox('Estadísticas y Visualización (cont.)', { fontSize: 16, fontStyle: 'bold' });
+            pdf.addImage(pieImgData, 'PNG', margin, y, chartWidth, pieHeight, undefined, 'FAST');
+            pdf.addImage(barImgData, 'PNG', margin + chartWidth + 10, y, chartWidth, barHeight, undefined, 'FAST');
           }
-
-          pdf.addImage(pieImgData, 'PNG', margin, y, chartWidth, pieHeight, undefined, 'FAST');
-          pdf.addImage(barImgData, 'PNG', margin + chartWidth + 10, y, chartWidth, barHeight, undefined, 'FAST');
         }
         
         pdf.save(`reporte-observaciones-${format(new Date(), 'yyyy-MM-dd')}.pdf`);

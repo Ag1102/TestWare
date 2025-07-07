@@ -1,6 +1,8 @@
-import { initializeApp, getApp, getApps } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { initializeApp, getApp, getApps, type FirebaseApp } from "firebase/app";
+import { getFirestore, type Firestore } from "firebase/firestore";
 
+// IMPORTANT: Replace with your Firebase project's configuration.
+// You can find this in your Firebase project settings under "Project settings" > "General".
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -10,18 +12,23 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-let app;
-let db;
+let app: FirebaseApp;
+let db: Firestore | null = null;
 
-// Check if all required environment variables are set
+// This check allows the app to run without a Firebase config for local development or testing,
+// although real-time features will be disabled.
 const areCredsSet = firebaseConfig.apiKey && firebaseConfig.projectId;
 
 if (areCredsSet) {
-  // Initialize Firebase
-  app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-  db = getFirestore(app);
+  try {
+    // Initialize Firebase only once
+    app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+    db = getFirestore(app);
+  } catch (e) {
+    console.error("Firebase initialization failed:", e);
+  }
 } else {
-    console.warn("Firebase config not found in .env, real-time features will be disabled.");
+  console.warn("Firebase configuration not found or incomplete in environment variables. Real-time collaboration will be disabled.");
 }
 
 export { db };

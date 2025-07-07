@@ -27,7 +27,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { useToast } from "@/hooks/use-toast";
 import { generateReportAction } from '@/app/actions';
-import { Upload, Download, Trash2, FileText, Loader2, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter, PieChart as PieChartIcon, Search, Bug } from 'lucide-react';
+import { Upload, Download, Trash2, FileText, Loader2, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter, PieChart as PieChartIcon, Search, Bug, ClipboardList } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
@@ -259,6 +259,7 @@ const TestwareDashboard: React.FC = () => {
             <div className="flex items-center justify-end space-x-2">
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".json" className="hidden" id="json-upload" />
               <Button variant="outline" onClick={() => fileInputRef.current?.click()}><Upload /> Cargar JSON</Button>
+              <GeneralReportDialog allCases={testCases} stats={stats} />
               <FailureReportDialog failedCases={testCases.filter(tc => tc.estado === 'Failed')} allCases={testCases} stats={stats} />
               <Button variant="destructive" onClick={handleClearData} disabled={!testCases.length}><Trash2 /> Limpiar Todo</Button>
             </div>
@@ -616,18 +617,20 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
 
         const addHeaderAndFooter = (isFirstPage = false) => {
             if (isFirstPage) {
-                y = 60; // Start content lower on the first page
+                y = 60; 
                 return;
             }
-            pdf.setFontSize(10);
-            pdf.setTextColor(100);
-            pdf.text('Informe de Hallazgos de QA', margin, margin - 5);
-            pdf.setLineWidth(0.5);
-            pdf.line(margin, margin, pdfWidth - margin, margin);
+            if (pageNumber > 1) {
+              pdf.setFontSize(10);
+              pdf.setTextColor(100);
+              pdf.text('Informe de Hallazgos de QA', margin, margin - 5);
+              pdf.setLineWidth(0.5);
+              pdf.line(margin, margin, pdfWidth - margin, margin);
 
-            // Footer
-            pdf.setTextColor(150);
-            pdf.text(`Página ${pageNumber}`, pdfWidth - margin, pdf.internal.pageSize.getHeight() - margin + 10, { align: 'right' });
+              // Footer
+              pdf.setTextColor(150);
+              pdf.text(`Página ${pageNumber}`, pdfWidth - margin, pdf.internal.pageSize.getHeight() - margin + 10, { align: 'right' });
+            }
             y = margin + 5;
         };
         
@@ -810,7 +813,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
   return (
     <Dialog onOpenChange={(open) => !open && resetDialog()}>
       <DialogTrigger asChild>
-        <Button variant="destructive" disabled={!failedCases.length}><FileText /> Informe de Fallos ({failedCases.length})</Button>
+        <Button variant="destructive" disabled={!failedCases.length}><Bug /> Informe de Fallos ({failedCases.length})</Button>
       </DialogTrigger>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
@@ -884,5 +887,273 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
     </Dialog>
   );
 };
+
+const GeneralReportDialog: React.FC<{ allCases: TestCase[]; stats: any }> = ({ allCases, stats }) => {
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  const [reportDescription, setReportDescription] = useState('');
+  const [authorName, setAuthorName] = useState('');
+  const { toast } = useToast();
+
+  const handleDownloadPdf = async () => {
+    if (!reportDescription.trim()) {
+      toast({ title: "Resumen Requerido", description: "Por favor, proporciona un resumen para el reporte.", variant: "destructive" });
+      return;
+    }
+    if (!authorName.trim()) {
+      toast({ title: "Autor Requerido", description: "Por favor, ingresa el nombre del autor.", variant: "destructive" });
+      return;
+    }
+
+    setIsDownloadingPdf(true);
+
+    try {
+        const pdf = new jsPDF('p', 'mm', 'a4');
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const margin = 15;
+        const contentWidth = pdfWidth - (margin * 2);
+        let y = 0;
+        let pageNumber = 1;
+
+        const addHeaderAndFooter = (isFirstPage = false) => {
+            if (isFirstPage) {
+                y = 60;
+                return;
+            }
+            if (pageNumber > 1) {
+              pdf.setFontSize(10);
+              pdf.setTextColor(100);
+              pdf.text('Informe General de Pruebas', margin, margin - 5);
+              pdf.setLineWidth(0.5);
+              pdf.line(margin, margin, pdfWidth - margin, margin);
+              pdf.setTextColor(150);
+              pdf.text(`Página ${pageNumber}`, pdfWidth - margin, pdf.internal.pageSize.getHeight() - margin + 10, { align: 'right' });
+            }
+            y = margin + 5;
+        };
+        
+        const addPageWithHeader = () => {
+            pdf.addPage();
+            pageNumber++;
+            addHeaderAndFooter();
+        };
+
+        const addTextBox = (text: string, options: any = {}) => {
+            const { isTitle = false, isSubtitle = false, isCode = false, color = [0, 0, 0], fontSize = 10, fontStyle = 'normal' } = options;
+        
+            pdf.setFont('helvetica', fontStyle);
+            if (isCode) pdf.setFont('courier', 'normal');
+            pdf.setFontSize(fontSize);
+            pdf.setTextColor(color[0], color[1], color[2]);
+        
+            const lines = pdf.splitTextToSize(text || '-', contentWidth - (isSubtitle ? 4 : 0));
+            const textHeight = (pdf.getLineHeight() / pdf.internal.scaleFactor) * lines.length;
+            
+            if (y + textHeight > pdf.internal.pageSize.getHeight() - margin - 5) {
+                addPageWithHeader();
+            }
+        
+            pdf.text(lines, margin + (isSubtitle ? 2 : 0), y);
+            y += textHeight + 2; 
+        };
+        
+        // --- PAGE 1: COVER ---
+        addHeaderAndFooter(true);
+        const currentDate = new Date();
+        const formattedDate = format(currentDate, 'dd / MM / yyyy');
+        const evaluatedPeriod = format(currentDate, 'MMMM yyyy', { locale: es });
+        const capitalizedPeriod = evaluatedPeriod.charAt(0).toUpperCase() + evaluatedPeriod.slice(1);
+        const uniqueProcesses = [...new Set(allCases.map(tc => tc.proceso).filter(Boolean))];
+        
+        pdf.setFontSize(32).setFont('helvetica', 'bold').setTextColor(93, 84, 164).text('Informe General de Pruebas', pdfWidth / 2, y, { align: 'center' });
+        y += 10;
+        pdf.setFontSize(16).setFont('helvetica', 'normal').setTextColor(119, 119, 119).text('TESTWARE', pdfWidth / 2, y, { align: 'center' });
+        
+        y = 110;
+        addTextBox(`Elaborado por: ${authorName}`, { fontSize: 12 });
+        addTextBox(`Fecha: ${formattedDate}`, { fontSize: 12 });
+        addTextBox(`Período Evaluado: ${capitalizedPeriod}`, { fontSize: 12 });
+        y += 10;
+        addTextBox('Procesos Evaluados', { fontSize: 14, fontStyle: 'bold' });
+        addTextBox(uniqueProcesses.join(', '), { fontSize: 12 });
+        
+        // --- PAGE 2: REPORT SUMMARY ---
+        addPageWithHeader();
+        addTextBox('Resumen del Reporte', { isTitle: true, fontSize: 18 });
+        y += 5;
+        addTextBox(reportDescription, { fontSize: 11 });
+
+        // --- SUBSEQUENT PAGES: ALL TEST CASES ---
+        if (allCases.length > 0) {
+            addPageWithHeader();
+            addTextBox('Detalle de Casos de Prueba', { isTitle: true, fontSize: 18 });
+            y += 5;
+
+            for (const tc of allCases) {
+                const estimateCardHeight = () => {
+                    let height = 25; // Header
+                    const fields = [tc.descripcion, tc.pasoAPaso, tc.datosPrueba, tc.resultadoEsperado, tc.comentarios, tc.evidencia];
+                    fields.forEach(f => {
+                        if (f && !f.startsWith('data:image')) {
+                            const lines = pdf.splitTextToSize(f, contentWidth - 4);
+                            height += (pdf.getLineHeight() / pdf.internal.scaleFactor) * lines.length + 8;
+                        }
+                    });
+                    if (tc.evidencia && tc.evidencia.startsWith('data:image')) height += 60;
+                    return height;
+                };
+
+                if (y + estimateCardHeight() > pdf.internal.pageSize.getHeight() - margin - 5) {
+                    addPageWithHeader();
+                    addTextBox('Detalle de Casos de Prueba (cont.)', { isTitle: true, fontSize: 18 });
+                    y += 5;
+                }
+                
+                const statusColor = tc.estado === 'Failed' ? '#e53935' : tc.estado === 'Passed' ? '#43a047' : '#757575';
+                pdf.setDrawColor(224, 224, 224);
+                pdf.setFillColor(245, 245, 245);
+                pdf.rect(margin, y - 5, contentWidth, 12, 'FD');
+                pdf.setFont('helvetica', 'bold').setFontSize(12).setTextColor(51, 51, 51);
+                pdf.text(`CASO: ${tc.casoPrueba} — ${tc.proceso}`, margin + 2, y + 2);
+                pdf.setFont('helvetica', 'bold').setFontSize(10).setTextColor(statusColor);
+                pdf.text(`[${statusMap[tc.estado]}]`, pdfWidth - margin - 2, y + 2, { align: 'right' });
+
+                y += 13;
+                
+                const renderField = (label: string, value: string, isCode = false, color = [0,0,0]) => {
+                  if (!value) return;
+                  addTextBox(label, { isSubtitle: true, fontSize: 10, fontStyle: 'bold' });
+                  addTextBox(value, { isCode, color, fontSize: 10 });
+                }
+
+                renderField('Descripción:', tc.descripcion);
+                renderField('Paso a Paso:', tc.pasoAPaso, true);
+                renderField('Datos de Prueba:', tc.datosPrueba);
+                renderField('Resultado Esperado:', tc.resultadoEsperado);
+                if (tc.comentarios) {
+                    const commentColor = tc.estado === 'Failed' ? [192, 57, 43] : [0, 0, 0];
+                    renderField('Comentarios:', tc.comentarios, false, commentColor);
+                }
+                
+                addTextBox('Evidencia:', { isSubtitle: true, fontSize: 10, fontStyle: 'bold' });
+                if (tc.evidencia && tc.evidencia.startsWith('data:image')) {
+                    try {
+                        const img = new Image();
+                        img.src = tc.evidencia;
+                        const imgWidth = contentWidth - 4;
+                        const imgHeight = (img.height * imgWidth) / img.width;
+                        if (y + imgHeight > pdf.internal.pageSize.getHeight() - margin - 5) addPageWithHeader();
+                        pdf.addImage(tc.evidencia, 'PNG', margin + 2, y, imgWidth, imgHeight, undefined, 'FAST');
+                        y += imgHeight + 5;
+                    } catch (e) { addTextBox('Error al cargar imagen', {}); }
+                } else if (tc.evidencia) {
+                    addTextBox(tc.evidencia, { isCode: false, color: [41, 128, 185], fontSize: 10 });
+                } else {
+                    addTextBox('-', { fontSize: 10 });
+                }
+                
+                y += 5;
+            }
+        }
+        
+        // --- LAST PAGE: STATISTICS ---
+        addPageWithHeader();
+        addTextBox('Estadísticas y Visualización', { isTitle: true, fontSize: 18 });
+        y += 5;
+
+        const pieChartEl = document.getElementById('pdf-pie-chart-card');
+        const barChartEl = document.getElementById('pdf-bar-chart-card');
+        
+        if (pieChartEl && barChartEl) {
+          const addChart = async (element: HTMLElement, options: { width: number; x: number; y: number; }) => {
+              const canvas = await html2canvas(element, { scale: 3, backgroundColor: '#ffffff', useCORS: true });
+              const imgData = canvas.toDataURL('image/png');
+              const imgWidth = options.width;
+              const imgHeight = (canvas.height * imgWidth) / canvas.width;
+              if (options.y + imgHeight > pdf.internal.pageSize.getHeight() - margin) {
+                  addPageWithHeader();
+                  options.y = y;
+              }
+              pdf.addImage(imgData, 'PNG', options.x, options.y, imgWidth, imgHeight, undefined, 'FAST');
+              return imgHeight;
+          };
+          
+          const chartWidth = contentWidth / 2 - 5;
+          const chartY = y;
+          await addChart(pieChartEl, { width: chartWidth, x: margin, y: chartY });
+          await addChart(barChartEl, { width: chartWidth, x: margin + chartWidth + 10, y: chartY });
+        }
+
+        pdf.save(`reporte-general-${format(new Date(), 'yyyy-MM-dd')}.pdf`);
+    } catch (error) {
+        console.error("Error generating PDF:", error);
+        toast({ title: "Error de PDF", description: "No se pudo generar el archivo PDF.", variant: "destructive" });
+    } finally {
+        setIsDownloadingPdf(false);
+    }
+  };
+
+  const resetDialog = () => {
+    setReportDescription('');
+    setAuthorName('');
+    setIsDownloadingPdf(false);
+  };
+
+  return (
+    <Dialog onOpenChange={(open) => !open && resetDialog()}>
+      <DialogTrigger asChild>
+        <Button variant="outline" disabled={!allCases.length}><ClipboardList /> Informe General</Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Generar Informe General de Pruebas en PDF</DialogTitle>
+        </DialogHeader>
+        
+        <div className="space-y-4 py-4">
+            <p>Genera un reporte detallado con los {allCases.length} caso(s) de prueba. El informe incluirá todos los casos, independientemente de su estado.</p>
+            <div>
+              <Label htmlFor="general-author-name" className="font-semibold">Elaborado por</Label>
+              <Input
+                id="general-author-name"
+                placeholder="Ingresa tu nombre completo"
+                value={authorName}
+                onChange={(e) => setAuthorName(e.target.value)}
+                className="mt-2"
+              />
+            </div>
+            <div>
+              <Label htmlFor="general-report-description" className="font-semibold">Resumen del Reporte</Label>
+              <Textarea
+                id="general-report-description"
+                placeholder="Proporciona un resumen general o contexto para este informe. Esto es requerido."
+                value={reportDescription}
+                onChange={(e) => setReportDescription(e.target.value)}
+                className="mt-2 min-h-[100px]"
+              />
+            </div>
+          </div>
+        
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="secondary">Cerrar</Button>
+          </DialogClose>
+          <Button onClick={handleDownloadPdf} disabled={isDownloadingPdf}>
+            {isDownloadingPdf ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Descargando...
+              </>
+            ) : (
+              <>
+                <Download className="mr-2 h-4 w-4" />
+                Descargar PDF
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 
 export default TestwareDashboard;

@@ -55,6 +55,134 @@ export async function generateImprovementReportAction(
 
 // --- AZURE DEVOPS ACTIONS ---
 
+export interface AzureOrganization {
+  id: string;
+  name: string;
+}
+
+interface AzureOrganizationsOutput {
+  success: boolean;
+  organizations?: AzureOrganization[];
+  error?: string;
+}
+
+const AzurePatInputSchema = z.object({
+  pat: z.string().min(1, 'El PAT es requerido.'),
+});
+
+export async function getAzureOrganizationsAction(
+  input: z.infer<typeof AzurePatInputSchema>
+): Promise<AzureOrganizationsOutput> {
+  const result = AzurePatInputSchema.safeParse(input);
+  if (!result.success) {
+    return {success: false, error: 'Datos de entrada inválidos.'};
+  }
+
+  const {pat} = result.data;
+  const authHeader = `Basic ${Buffer.from(`:${pat}`).toString('base64')}`;
+
+  try {
+    const profileUrl =
+      'https://app.vssps.visualstudio.com/_apis/profile/profiles/me?api-version=7.0';
+    const profileResponse = await fetch(profileUrl, {
+      headers: {Authorization: authHeader},
+    });
+    if (!profileResponse.ok) {
+      throw new Error(
+        `Error al obtener el perfil de usuario: ${profileResponse.statusText}`
+      );
+    }
+    const profileData = await profileResponse.json();
+    const memberId = profileData.id;
+
+    if (!memberId) {
+      throw new Error('No se pudo obtener el ID de miembro del perfil.');
+    }
+
+    const orgsUrl = `https://app.vssps.visualstudio.com/_apis/accounts?memberId=${memberId}&api-version=7.0`;
+    const orgsResponse = await fetch(orgsUrl, {
+      headers: {Authorization: authHeader},
+    });
+
+    if (!orgsResponse.ok) {
+      throw new Error(
+        `Error al obtener las organizaciones: ${orgsResponse.statusText}`
+      );
+    }
+
+    const orgsData = await orgsResponse.json();
+    const organizations: AzureOrganization[] = orgsData.value.map(
+      (org: any) => ({
+        id: org.accountId,
+        name: org.accountName,
+      })
+    );
+
+    return {success: true, organizations};
+  } catch (error: any) {
+    console.error('Failed to fetch Azure organizations:', error);
+    return {
+      success: false,
+      error:
+        error.message ||
+        'An unknown error occurred while fetching organizations.',
+    };
+  }
+}
+
+export interface AzureProject {
+  id: string;
+  name: string;
+}
+
+interface AzureProjectsOutput {
+  success: boolean;
+  projects?: AzureProject[];
+  error?: string;
+}
+
+const AzureProjectsInputSchema = z.object({
+  organization: z.string().min(1, 'La organización es requerida.'),
+  pat: z.string().min(1, 'El PAT es requerido.'),
+});
+
+export async function getAzureProjectsAction(
+  input: z.infer<typeof AzureProjectsInputSchema>
+): Promise<AzureProjectsOutput> {
+  const result = AzureProjectsInputSchema.safeParse(input);
+  if (!result.success) {
+    return {success: false, error: 'Datos de entrada inválidos.'};
+  }
+  const {organization, pat} = result.data;
+  const url = `https://dev.azure.com/${organization}/_apis/projects?api-version=7.0`;
+  const authHeader = `Basic ${Buffer.from(`:${pat}`).toString('base64')}`;
+
+  try {
+    const response = await fetch(url, {headers: {Authorization: authHeader}});
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(
+        `Error al obtener los proyectos: ${
+          errorData.message || response.statusText
+        }`
+      );
+    }
+    const data = await response.json();
+    const projects: AzureProject[] = data.value.map((project: any) => ({
+      id: project.id,
+      name: project.name,
+    }));
+    return {success: true, projects};
+  } catch (error: any) {
+    console.error('Failed to fetch Azure projects:', error);
+    return {
+      success: false,
+      error:
+        error.message || 'An unknown error occurred while fetching projects.',
+    };
+  }
+}
+
 const AzureTestPlansInputSchema = z.object({
   organization: z.string().min(1, 'La organización es requerida.'),
   project: z.string().min(1, 'El proyecto es requerido.'),

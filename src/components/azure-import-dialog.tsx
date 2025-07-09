@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -17,9 +17,16 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Cloud, Download, Search } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
-import { getAzureTestPlansAction, importFromAzureAction, type AzureTestPlan } from '@/app/actions';
+import { 
+    getAzureOrganizationsAction,
+    getAzureProjectsAction,
+    getAzureTestPlansAction, 
+    importFromAzureAction,
+    type AzureOrganization,
+    type AzureProject,
+    type AzureTestPlan 
+} from '@/app/actions';
 import type { TestCase } from '@/lib/types';
-import { simpleUUID } from '@/lib/utils';
 
 interface AzureImportDialogProps {
   onImport: (cases: Omit<TestCase, 'id'>[]) => void;
@@ -28,59 +35,107 @@ interface AzureImportDialogProps {
 
 export const AzureImportDialog: React.FC<AzureImportDialogProps> = ({ onImport, children }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isFetchingPlans, setIsFetchingPlans] = useState(false);
-  const [step, setStep] = useState<'config' | 'select'>('config');
   
-  const [azureData, setAzureData] = useState({
-    organization: '',
-    project: '',
-    pat: '',
-  });
+  // State for the flow
+  const [pat, setPat] = useState('');
+  const [organizations, setOrganizations] = useState<AzureOrganization[]>([]);
+  const [selectedOrg, setSelectedOrg] = useState('');
+  const [projects, setProjects] = useState<AzureProject[]>([]);
+  const [selectedProject, setSelectedProject] = useState('');
   const [testPlans, setTestPlans] = useState<AzureTestPlan[]>([]);
-  const [selectedPlanId, setSelectedPlanId] = useState<string>('');
+  const [selectedPlanId, setSelectedPlanId] = useState('');
+  
+  // Loading states
+  const [isFetching, setIsFetching] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
 
   const { toast } = useToast();
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { id, value } = e.target;
-    setAzureData(prev => ({ ...prev, [id]: value }));
-  };
-
-  const handleFetchPlans = async () => {
-    const { organization, project, pat } = azureData;
-    if (!organization || !project || !pat) {
-      toast({ title: "Campos Requeridos", description: "Todos los campos son obligatorios para buscar planes.", variant: "destructive" });
+  const handleFetchOrganizations = async () => {
+    if (!pat) {
+      toast({ title: "Token Requerido", description: "Por favor, ingresa un Personal Access Token (PAT).", variant: "destructive" });
       return;
     }
-    setIsFetchingPlans(true);
+    setIsFetching(true);
+    resetProjectSelection();
+    resetOrgSelection();
     try {
-      const result = await getAzureTestPlansAction({ organization, project, pat });
-      if (result.success && result.plans) {
-        if (result.plans.length === 0) {
-            toast({ title: "No se encontraron planes", description: "No se encontraron planes de prueba en el proyecto especificado.", variant: "default" });
+      const result = await getAzureOrganizationsAction({ pat });
+      if (result.success && result.organizations) {
+        setOrganizations(result.organizations);
+        if (result.organizations.length === 0) {
+            toast({ title: "No se encontraron organizaciones", description: "Asegúrate de que el PAT tenga los permisos correctos.", variant: "default" });
         }
-        setTestPlans(result.plans);
-        setStep('select');
       } else {
-        throw new Error(result.error || 'Error desconocido al buscar planes de prueba.');
+        throw new Error(result.error || 'Error desconocido al buscar organizaciones.');
       }
     } catch (error: any) {
       toast({ title: "Error al buscar", description: error.message, variant: "destructive" });
     } finally {
-      setIsFetchingPlans(false);
+      setIsFetching(false);
     }
   };
+  
+  // Use effects to chain the fetching
+  useEffect(() => {
+    const fetchProjects = async () => {
+      if (!selectedOrg || !pat) return;
+      
+      setIsFetching(true);
+      resetProjectSelection();
+      try {
+        const result = await getAzureProjectsAction({ organization: selectedOrg, pat });
+        if (result.success && result.projects) {
+          setProjects(result.projects);
+           if (result.projects.length === 0) {
+            toast({ title: "No se encontraron proyectos", description: "No se encontraron proyectos en esta organización.", variant: "default" });
+          }
+        } else {
+          throw new Error(result.error || 'Error desconocido al buscar proyectos.');
+        }
+      } catch (error: any) {
+        toast({ title: "Error al buscar", description: error.message, variant: "destructive" });
+      } finally {
+        setIsFetching(false);
+      }
+    };
+    fetchProjects();
+  }, [selectedOrg, pat, toast]);
+  
+  useEffect(() => {
+    const fetchTestPlans = async () => {
+      if (!selectedOrg || !selectedProject || !pat) return;
+
+      setIsFetching(true);
+      setTestPlans([]);
+      setSelectedPlanId('');
+      try {
+        const result = await getAzureTestPlansAction({ organization: selectedOrg, project: selectedProject, pat });
+        if (result.success && result.plans) {
+          setTestPlans(result.plans);
+          if (result.plans.length === 0) {
+            toast({ title: "No se encontraron planes", description: "No se encontraron planes de prueba en este proyecto.", variant: "default" });
+          }
+        } else {
+          throw new Error(result.error || 'Error desconocido al buscar planes.');
+        }
+      } catch (error: any) {
+        toast({ title: "Error al buscar", description: error.message, variant: "destructive" });
+      } finally {
+        setIsFetching(false);
+      }
+    };
+    fetchTestPlans();
+  }, [selectedOrg, selectedProject, pat, toast]);
 
   const handleImport = async () => {
     if (!selectedPlanId) {
       toast({ title: "Selección Requerida", description: "Por favor, selecciona un plan de pruebas.", variant: "destructive" });
       return;
     }
-    setIsLoading(true);
+    setIsImporting(true);
     try {
-      const result = await importFromAzureAction({ ...azureData, planId: selectedPlanId });
-      
+      const result = await importFromAzureAction({ organization: selectedOrg, project: selectedProject, planId: selectedPlanId, pat });
       if (result.success && result.testCases) {
         onImport(result.testCases);
         toast({ title: "Importación Exitosa", description: `${result.testCases.length} casos de prueba importados.` });
@@ -91,18 +146,29 @@ export const AzureImportDialog: React.FC<AzureImportDialogProps> = ({ onImport, 
     } catch (error: any) {
       toast({ title: "Error de Importación", description: error.message, variant: "destructive" });
     } finally {
-      setIsLoading(false);
+      setIsImporting(false);
     }
   };
 
   const resetDialog = () => {
-    setAzureData({ organization: '', project: '', pat: '' });
-    setTestPlans([]);
-    setSelectedPlanId('');
-    setStep('config');
-    setIsLoading(false);
-    setIsFetchingPlans(false);
+    setPat('');
+    resetOrgSelection();
+    setIsFetching(false);
+    setIsImporting(false);
   };
+  
+  const resetOrgSelection = () => {
+    setOrganizations([]);
+    setSelectedOrg('');
+    resetProjectSelection();
+  }
+
+  const resetProjectSelection = () => {
+      setProjects([]);
+      setSelectedProject('');
+      setTestPlans([]);
+      setSelectedPlanId('');
+  }
 
   const dialogTrigger = children || <Button variant="outline"><Cloud /> Importar desde Azure</Button>;
 
@@ -113,66 +179,75 @@ export const AzureImportDialog: React.FC<AzureImportDialogProps> = ({ onImport, 
         <DialogHeader>
           <DialogTitle>Importar desde Azure DevOps</DialogTitle>
           <DialogDescription>
-            {step === 'config'
-              ? "Ingresa los detalles de tu proyecto para buscar planes de prueba."
-              : "Selecciona un plan de pruebas de la lista para importar los casos."}
+            Conéctate a tu cuenta para importar planes de prueba de forma dinámica.
           </DialogDescription>
         </DialogHeader>
-        
-        {step === 'config' && (
-            <div className="space-y-4 py-4">
-            <div className="space-y-2">
-                <Label htmlFor="organization">Organización</Label>
-                <Input id="organization" placeholder="tu_organizacion" value={azureData.organization} onChange={handleInputChange} disabled={isFetchingPlans}/>
-            </div>
-            <div className="space-y-2">
-                <Label htmlFor="project">Proyecto</Label>
-                <Input id="project" placeholder="Nombre del Proyecto" value={azureData.project} onChange={handleInputChange} disabled={isFetchingPlans}/>
-            </div>
+
+        <div className="space-y-4 py-2">
             <div className="space-y-2">
                 <Label htmlFor="pat">Personal Access Token (PAT)</Label>
-                <Input id="pat" type="password" placeholder="••••••••••••••••••" value={azureData.pat} onChange={handleInputChange} disabled={isFetchingPlans}/>
+                <div className="flex gap-2">
+                    <Input id="pat" type="password" placeholder="••••••••••••••••••" value={pat} onChange={(e) => setPat(e.target.value)} disabled={isFetching}/>
+                    <Button onClick={handleFetchOrganizations} disabled={isFetching || !pat} className="w-40">
+                        {isFetching && organizations.length === 0 ? <Loader2 className="animate-spin" /> : <Search />}
+                        <span>Buscar</span>
+                    </Button>
+                </div>
                 <p className="text-xs text-muted-foreground pt-1">Tu PAT solo se usa para esta solicitud y no se almacena.</p>
             </div>
-            </div>
-        )}
-
-        {step === 'select' && (
-          <div className="py-4">
-             <Label htmlFor="planId">Plan de Pruebas</Label>
-             <Select value={selectedPlanId} onValueChange={setSelectedPlanId} disabled={isLoading}>
-                <SelectTrigger id="planId" className="w-full mt-2">
-                    <SelectValue placeholder="Selecciona un plan..." />
-                </SelectTrigger>
-                <SelectContent>
-                    {testPlans.map(plan => (
-                        <SelectItem key={plan.id} value={plan.id}>{plan.name}</SelectItem>
-                    ))}
-                </SelectContent>
-             </Select>
-          </div>
-        )}
-
-        <DialogFooter className="sm:justify-between">
-          {step === 'select' && (
-             <Button variant="ghost" onClick={() => setStep('config')} disabled={isLoading}>Atrás</Button>
-          )}
-          <div className="flex gap-2">
-            <DialogClose asChild>
-                <Button variant="outline" disabled={isLoading || isFetchingPlans}>Cancelar</Button>
-            </DialogClose>
-            {step === 'config' ? (
-                 <Button onClick={handleFetchPlans} disabled={isFetchingPlans}>
-                    {isFetchingPlans ? <Loader2 className="animate-spin" /> : <Search />}
-                    Buscar Planes
-                </Button>
-            ) : (
-                <Button onClick={handleImport} disabled={isLoading || !selectedPlanId}>
-                    {isLoading ? <Loader2 className="animate-spin" /> : <Download />}
-                    Importar
-                </Button>
+            
+            {organizations.length > 0 && (
+                <div className="space-y-2">
+                    <Label htmlFor="organization">Organización</Label>
+                    <Select value={selectedOrg} onValueChange={setSelectedOrg} disabled={isFetching}>
+                        <SelectTrigger id="organization"><SelectValue placeholder="Selecciona una organización..." /></SelectTrigger>
+                        <SelectContent>
+                            {organizations.map(org => <SelectItem key={org.id} value={org.name}>{org.name}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                </div>
             )}
-          </div>
+            
+            {selectedOrg && projects.length > 0 && (
+                 <div className="space-y-2">
+                    <Label htmlFor="project">Proyecto</Label>
+                    <Select value={selectedProject} onValueChange={setSelectedProject} disabled={isFetching}>
+                        <SelectTrigger id="project"><SelectValue placeholder="Selecciona un proyecto..." /></SelectTrigger>
+                        <SelectContent>
+                            {projects.map(proj => <SelectItem key={proj.id} value={proj.name}>{proj.name}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                 </div>
+            )}
+            
+            {selectedProject && testPlans.length > 0 && (
+                <div className="space-y-2">
+                    <Label htmlFor="planId">Plan de Pruebas</Label>
+                    <Select value={selectedPlanId} onValueChange={setSelectedPlanId} disabled={isFetching}>
+                        <SelectTrigger id="planId"><SelectValue placeholder="Selecciona un plan..." /></SelectTrigger>
+                        <SelectContent>
+                            {testPlans.map(plan => <SelectItem key={plan.id} value={plan.id}>{plan.name}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                </div>
+            )}
+
+            {isFetching && organizations.length > 0 && (
+                <div className="flex items-center justify-center pt-4">
+                    <Loader2 className="h-6 w-6 animate-spin text-primary"/>
+                    <p className="ml-2 text-muted-foreground">Buscando...</p>
+                </div>
+            )}
+        </div>
+
+        <DialogFooter>
+            <DialogClose asChild>
+                <Button variant="outline" disabled={isImporting}>Cancelar</Button>
+            </DialogClose>
+            <Button onClick={handleImport} disabled={isImporting || !selectedPlanId}>
+                {isImporting ? <Loader2 className="animate-spin" /> : <Download />}
+                Importar Casos
+            </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

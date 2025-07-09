@@ -94,6 +94,7 @@ export const AzureImportDialog: React.FC<AzureImportDialogProps> = ({ onImport, 
           throw new Error(result.error || 'Error desconocido al buscar proyectos.');
         }
       } catch (error: any) {
+
         toast({ title: "Error al buscar", description: error.message, variant: "destructive" });
       } finally {
         setIsFetching(false);
@@ -120,6 +121,7 @@ export const AzureImportDialog: React.FC<AzureImportDialogProps> = ({ onImport, 
           throw new Error(result.error || 'Error desconocido al buscar planes.');
         }
       } catch (error: any) {
+
         toast({ title: "Error al buscar", description: error.message, variant: "destructive" });
       } finally {
         setIsFetching(false);

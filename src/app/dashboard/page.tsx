@@ -41,8 +41,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useToast } from "@/hooks/use-toast";
-import { generateReportAction, generateImprovementReportAction } from '@/app/actions';
-import { Upload, Download, Trash2, Bug, Lightbulb, Loader2, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter, PieChart as PieChartIcon, LogIn, PlusCircle, Copy, LogOut, Share2, User as UserIcon, Power, PanelLeft, MoreVertical } from 'lucide-react';
+import { generateReportAction, generateImprovementReportAction, importFromAzureAction } from '@/app/actions';
+import { Upload, Download, Trash2, Bug, Lightbulb, Loader2, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter, PieChart as PieChartIcon, LogIn, PlusCircle, Copy, LogOut, Share2, User as UserIcon, Power, PanelLeft, MoreVertical, Cloud } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
@@ -290,6 +290,12 @@ const TestwareDashboard: React.FC = () => {
       }
     }
   }, [sessionCode, toast]);
+  
+  const addImportedCases = (newCases: TestCase[]) => {
+     const updatedCases = [...testCases, ...newCases];
+     updateFirestoreTestCases(updatedCases);
+     toast({ title: "Éxito", description: `${newCases.length} casos de prueba importados.` });
+  }
 
   const processes = useMemo(() => ['all', ...Array.from(new Set(testCases.map(tc => tc.proceso))).filter(Boolean)], [testCases]);
   const failedCases = useMemo(() => testCases.filter(tc => tc.estado === 'Failed'), [testCases]);
@@ -327,9 +333,7 @@ const TestwareDashboard: React.FC = () => {
             estado: c.estado || 'pending'
         }));
         
-        const updatedCases = [...testCases, ...newCases];
-        updateFirestoreTestCases(updatedCases);
-        toast({ title: "Éxito", description: `${json.length} casos de prueba cargados.` });
+        addImportedCases(newCases);
       } catch (error) {
         console.error("Failed to parse or upload JSON", error);
         toast({ title: "Fallo la Carga", description: "Por favor, carga un archivo JSON válido.", variant: "destructive" });
@@ -521,6 +525,7 @@ const TestwareDashboard: React.FC = () => {
               {!isViewerMode && (
                 <div className="hidden sm:flex items-center space-x-2">
                   <Button variant="outline" onClick={() => fileInputRef.current?.click()}><Upload /> Cargar JSON</Button>
+                  <AzureImportDialog onImport={addImportedCases} />
                   <ImprovementReportDialog commentedCases={commentedCases} allCases={testCases} stats={stats}/>
                   <FailureReportDialog failedCases={failedCases} allCases={testCases} />
                   <ClearAllConfirmationDialog onConfirm={handleClearData} disabled={!testCases.length} />
@@ -537,6 +542,9 @@ const TestwareDashboard: React.FC = () => {
                   {!isViewerMode && (
                     <>
                       <DropdownMenuItem className="sm:hidden" onClick={() => fileInputRef.current?.click()}><Upload className="mr-2"/> Cargar JSON</DropdownMenuItem>
+                       <AzureImportDialog onImport={addImportedCases}>
+                        <DropdownMenuItem onSelect={(e) => e.preventDefault()}><Cloud className="mr-2"/> Importar desde Azure</DropdownMenuItem>
+                       </AzureImportDialog>
                       <DropdownMenuSub className="sm:hidden">
                         <DropdownMenuSubTrigger><Bug className="mr-2"/> Informes</DropdownMenuSubTrigger>
                         <DropdownMenuPortal>
@@ -574,10 +582,13 @@ const TestwareDashboard: React.FC = () => {
               <div className="text-center py-20">
                 <Share2 className="mx-auto h-12 w-12 text-muted-foreground" />
                 <h2 className="text-2xl font-semibold mt-4">Sesión Lista para Colaborar</h2>
-                <p className="text-muted-foreground mt-2">Carga un archivo JSON o comparte el código de la sesión para empezar.</p>
-                <Button onClick={() => fileInputRef.current?.click()} className="mt-6 bg-primary hover:bg-primary/90">
-                  <Upload className="mr-2" /> Carga tu primer archivo
-                </Button>
+                <p className="text-muted-foreground mt-2">Importa tus casos de prueba para empezar.</p>
+                <div className="flex justify-center gap-4 mt-6">
+                    <Button onClick={() => fileInputRef.current?.click()} className="bg-primary hover:bg-primary/90">
+                      <Upload className="mr-2" /> Cargar JSON
+                    </Button>
+                    <AzureImportDialog onImport={addImportedCases} />
+                </div>
               </div>
             ) : (
             <div className="space-y-6">
@@ -1631,5 +1642,95 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
   );
 };
 
+const AzureImportDialog: React.FC<{ onImport: (cases: TestCase[]) => void, children?: React.ReactNode }> = ({ onImport, children }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [azureData, setAzureData] = useState({
+    organization: '',
+    project: '',
+    planId: '',
+    pat: '',
+  });
+  const { toast } = useToast();
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { id, value } = e.target;
+    setAzureData(prev => ({ ...prev, [id]: value }));
+  };
+
+  const handleImport = async () => {
+    const { organization, project, planId, pat } = azureData;
+    if (!organization || !project || !planId || !pat) {
+      toast({ title: "Campos Requeridos", description: "Todos los campos son obligatorios para importar.", variant: "destructive" });
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const result = await importFromAzureAction({ organization, project, planId, pat });
+      if (result.success && result.testCases) {
+        onImport(result.testCases.map(tc => ({ ...tc, id: simpleUUID() })));
+        setIsOpen(false);
+      } else {
+        throw new Error(result.error || 'Error desconocido al importar desde Azure.');
+      }
+    } catch (error: any) {
+      console.error("Error importing from Azure:", error);
+      toast({ title: "Error de Importación", description: error.message, variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const resetDialog = () => {
+    setAzureData({ organization: '', project: '', planId: '', pat: '' });
+    setIsLoading(false);
+  };
+
+  const dialogTrigger = children || <Button variant="outline"><Cloud /> Importar desde Azure</Button>;
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => { setIsOpen(open); if (!open) resetDialog(); }}>
+      <DialogTrigger asChild>{dialogTrigger}</DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Importar Casos de Prueba desde Azure DevOps</DialogTitle>
+          <DialogDescription>
+            Ingresa los detalles de tu plan de pruebas de Azure. Tu Personal Access Token (PAT) se maneja de forma segura y no se almacena.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label htmlFor="organization">Organización</Label>
+            <Input id="organization" placeholder="tu_organizacion" value={azureData.organization} onChange={handleInputChange} disabled={isLoading}/>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="project">Proyecto</Label>
+            <Input id="project" placeholder="Nombre del Proyecto" value={azureData.project} onChange={handleInputChange} disabled={isLoading}/>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="planId">ID del Plan de Pruebas</Label>
+            <Input id="planId" placeholder="12345" value={azureData.planId} onChange={handleInputChange} disabled={isLoading}/>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="pat">Personal Access Token (PAT)</Label>
+            <Input id="pat" type="password" placeholder="••••••••••••••••••" value={azureData.pat} onChange={handleInputChange} disabled={isLoading}/>
+          </div>
+        </div>
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="outline" disabled={isLoading}>Cancelar</Button>
+          </DialogClose>
+          <Button onClick={handleImport} disabled={isLoading}>
+            {isLoading ? <Loader2 className="animate-spin" /> : <Download />}
+            Importar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 
 export default TestwareDashboard;
+
+    

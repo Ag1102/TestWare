@@ -69,17 +69,17 @@ const getImageDimensions = (dataUri: string): Promise<{ width: number; height: n
 
 
 const statusMap: Record<TestCaseStatus, string> = {
-  'Passed': 'Aprobado',
-  'Failed': 'Fallido',
+  'Aprobado': 'Aprobado',
+  'Fallido': 'Fallido',
   'N/A': 'N/A',
-  'pending': 'Pendiente',
+  'Pendiente': 'Pendiente',
 };
 
 const statusIcons: Record<TestCaseStatus, React.ReactNode> = {
-  'Passed': <CheckCircle2 className="h-5 w-5 text-green-500" />,
-  'Failed': <XCircle className="h-5 w-5 text-red-500" />,
+  'Aprobado': <CheckCircle2 className="h-5 w-5 text-green-500" />,
+  'Fallido': <XCircle className="h-5 w-5 text-red-500" />,
   'N/A': <FileQuestion className="h-5 w-5 text-gray-500" />,
-  'pending': <Hourglass className="h-5 w-5 text-yellow-500" />,
+  'Pendiente': <Hourglass className="h-5 w-5 text-yellow-500" />,
 }
 
 const TestwareLogo = ({ className }: { className?: string }) => (
@@ -262,7 +262,7 @@ const TestwareDashboard: React.FC = () => {
   }, [sessionCode, toast]);
 
   const processes = useMemo(() => ['all', ...Array.from(new Set(testCases.map(tc => tc.proceso))).filter(Boolean)], [testCases]);
-  const failedCases = useMemo(() => testCases.filter(tc => tc.estado === 'Failed'), [testCases]);
+  const failedCases = useMemo(() => testCases.filter(tc => tc.estado === 'Fallido'), [testCases]);
   const commentedCases = useMemo(() => testCases.filter(tc => tc.comentarios?.trim()), [testCases]);
 
   const filteredCases = useMemo(() => {
@@ -279,10 +279,10 @@ const TestwareDashboard: React.FC = () => {
 
   const stats = useMemo(() => {
     const total = testCases.length;
-    const passed = testCases.filter(c => c.estado === 'Passed').length;
-    const failed = testCases.filter(c => c.estado === 'Failed').length;
+    const passed = testCases.filter(c => c.estado === 'Aprobado').length;
+    const failed = testCases.filter(c => c.estado === 'Fallido').length;
     const na = testCases.filter(c => c.estado === 'N/A').length;
-    const pending = testCases.filter(c => c.estado === 'pending').length;
+    const pending = testCases.filter(c => c.estado === 'Pendiente').length;
     const completed = passed + failed + na;
     const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
     return { total, passed, failed, na, pending, completed, progress };
@@ -299,7 +299,7 @@ const TestwareDashboard: React.FC = () => {
         const newCases = json.map((c: any) => ({
             ...c,
             id: simpleUUID(),
-            estado: c.estado || 'pending'
+            estado: c.estado || 'Pendiente'
         }));
         
         const updatedCases = [...testCases, ...newCases];
@@ -329,7 +329,7 @@ const TestwareDashboard: React.FC = () => {
 
     const testCaseToUpdate = updatedCases.find(tc => tc.id === id);
   
-    if (field === 'estado' && value === 'Failed' && testCaseToUpdate) {
+    if (field === 'estado' && value === 'Fallido' && testCaseToUpdate) {
       if (!testCaseToUpdate.comentarios?.trim() || !testCaseToUpdate.evidencia?.trim()) {
         toast({
           title: "Información Requerida",
@@ -802,9 +802,9 @@ const ViewerDashboardContent = ({ stats, cases, currentFilter, setFilter }) => {
                         </div>
                     </div>
                      <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-                        <div onClick={() => handleFilterClick('Passed')} className={cn("p-3 bg-green-100 dark:bg-green-900/50 rounded-lg cursor-pointer transition-transform hover:scale-105", {'ring-2 ring-primary': currentFilter === 'Passed'})}><p className="text-2xl font-bold text-green-600">{stats.passed}</p><p className="text-sm font-medium text-muted-foreground">Aprobados</p></div>
-                        <div onClick={() => handleFilterClick('Failed')} className={cn("p-3 bg-red-100 dark:bg-red-900/50 rounded-lg cursor-pointer transition-transform hover:scale-105", {'ring-2 ring-primary': currentFilter === 'Failed'})}><p className="text-2xl font-bold text-red-600">{stats.failed}</p><p className="text-sm font-medium text-muted-foreground">Fallidos</p></div>
-                        <div onClick={() => handleFilterClick('pending')} className={cn("p-3 bg-yellow-100 dark:bg-yellow-900/50 rounded-lg cursor-pointer transition-transform hover:scale-105", {'ring-2 ring-primary': currentFilter === 'pending'})}><p className="text-2xl font-bold text-yellow-600">{stats.pending}</p><p className="text-sm font-medium text-muted-foreground">Pendientes</p></div>
+                        <div onClick={() => handleFilterClick('Aprobado')} className={cn("p-3 bg-green-100 dark:bg-green-900/50 rounded-lg cursor-pointer transition-transform hover:scale-105", {'ring-2 ring-primary': currentFilter === 'Aprobado'})}><p className="text-2xl font-bold text-green-600">{stats.passed}</p><p className="text-sm font-medium text-muted-foreground">Aprobados</p></div>
+                        <div onClick={() => handleFilterClick('Fallido')} className={cn("p-3 bg-red-100 dark:bg-red-900/50 rounded-lg cursor-pointer transition-transform hover:scale-105", {'ring-2 ring-primary': currentFilter === 'Fallido'})}><p className="text-2xl font-bold text-red-600">{stats.failed}</p><p className="text-sm font-medium text-muted-foreground">Fallidos</p></div>
+                        <div onClick={() => handleFilterClick('Pendiente')} className={cn("p-3 bg-yellow-100 dark:bg-yellow-900/50 rounded-lg cursor-pointer transition-transform hover:scale-105", {'ring-2 ring-primary': currentFilter === 'Pendiente'})}><p className="text-2xl font-bold text-yellow-600">{stats.pending}</p><p className="text-sm font-medium text-muted-foreground">Pendientes</p></div>
                         <div onClick={() => handleFilterClick('N/A')} className={cn("p-3 bg-gray-100 dark:bg-gray-900/50 rounded-lg cursor-pointer transition-transform hover:scale-105", {'ring-2 ring-primary': currentFilter === 'N/A'})}><p className="text-2xl font-bold text-gray-500">{stats.na}</p><p className="text-sm font-medium text-muted-foreground">N/A</p></div>
                     </div>
                 </CardContent>
@@ -982,7 +982,7 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
               defaultValue={testCase.comentarios}
               onBlur={(e) => onUpdate?.(testCase.id, 'comentarios', e.target.value)}
               className="min-h-[100px] bg-background/50"
-              placeholder={testCase.estado === 'Failed' ? 'Razón del fallo requerida' : 'Comentarios adicionales...'}
+              placeholder={testCase.estado === 'Fallido' ? 'Razón del fallo requerida' : 'Comentarios adicionales...'}
               readOnly={isViewerMode}
             />
           </div>
@@ -995,7 +995,7 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
                 key={`evidence-${testCase.id}`}
                 defaultValue={testCase.evidencia}
                 onBlur={e => onUpdate?.(testCase.id, 'evidencia', e.target.value)}
-                placeholder={testCase.estado === 'Failed' ? 'URL de evidencia requerida' : 'Pega la URL o carga una imagen'}
+                placeholder={testCase.estado === 'Fallido' ? 'URL de evidencia requerida' : 'Pega la URL o carga una imagen'}
                 className="bg-background/50"
                 readOnly={isViewerMode}
               />
@@ -1465,7 +1465,7 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
             y += 5;
             
             for (const tc of commentedCases) {
-                const statusColor = tc.estado === 'Failed' ? '#e53935' : tc.estado === 'Passed' ? '#43a047' : '#757575';
+                const statusColor = tc.estado === 'Fallido' ? '#e53935' : tc.estado === 'Aprobado' ? '#43a047' : '#757575';
                 
                 let estimatedHeight = 25;
                 const fieldsToEstimate = [tc.descripcion, tc.pasoAPaso, tc.datosPrueba, tc.resultadoEsperado, tc.comentarios];
@@ -1497,7 +1497,7 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
                 renderField('Datos de Prueba:', tc.datosPrueba);
                 renderField('Resultado Esperado:', tc.resultadoEsperado);
                 if(tc.comentarios) {
-                  renderField('Comentarios:', tc.comentarios, false, tc.estado === 'Failed' ? [192, 57, 43] : [0, 0, 0]);
+                  renderField('Comentarios:', tc.comentarios, false, tc.estado === 'Fallido' ? [192, 57, 43] : [0, 0, 0]);
                 }
                 
                 addTextBox('Evidencia:', { fontSize: 10, fontStyle: 'bold' });

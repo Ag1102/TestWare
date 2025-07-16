@@ -23,7 +23,7 @@ const ImprovementReportInputSchema = z.object({
       resultadoEsperado: z.string().describe('The expected result of the test case.'),
       evidencia: z.string().describe('A link or reference to the evidence for the test case.'),
       comentarios: z.string().describe('Comments from the QA engineer. This field will not be empty.'),
-      estado: z.enum(['Passed', 'Failed', 'N/A', 'pending']).describe('The status of the test case.'),
+      estado: z.enum(['Aprobado', 'Fallido', 'N/A', 'Pendiente']).describe('The status of the test case.'),
     })
   ).describe('An array of test cases that have comments.'),
 });

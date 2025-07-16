@@ -1,4 +1,4 @@
-export type TestCaseStatus = 'Passed' | 'Failed' | 'N/A' | 'pending';
+export type TestCaseStatus = 'Aprobado' | 'Fallido' | 'N/A' | 'Pendiente';
 
 export interface TestCase {
   id: string;
@@ -27,4 +27,3 @@ export interface AITestCase {
   comentarios: string;
   estado: 'Fallido';
 }
-

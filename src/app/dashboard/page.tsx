@@ -141,12 +141,8 @@ const TestwareDashboard: React.FC = () => {
   
   const [isViewerMode, setIsViewerMode] = useState(false);
   const [joinAsViewer, setJoinAsViewer] = useState(false);
-  const inactivityTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleLeaveSession = useCallback(() => {
-    if (inactivityTimerRef.current) {
-      clearTimeout(inactivityTimerRef.current);
-    }
     setSessionCode(null);
     setTestCases([]);
     setInputCode('');
@@ -199,31 +195,6 @@ const TestwareDashboard: React.FC = () => {
       }
     };
   }, [sessionCode, toast, handleLeaveSession]);
-  
-  // Inactivity timeout effect
-  useEffect(() => {
-    if (!sessionCode) {
-      return;
-    }
-
-    if (inactivityTimerRef.current) {
-      clearTimeout(inactivityTimerRef.current);
-    }
-
-    inactivityTimerRef.current = setTimeout(() => {
-      toast({
-        title: "Sesión cerrada por inactividad",
-        description: "La sesión se cerró automáticamente después de 20 minutos sin cambios.",
-      });
-      handleLeaveSession();
-    }, 20 * 60 * 1000); // 20 minutes
-
-    return () => {
-      if (inactivityTimerRef.current) {
-        clearTimeout(inactivityTimerRef.current);
-      }
-    };
-  }, [testCases, sessionCode, handleLeaveSession, toast]);
 
   const handleLogout = async () => {
     if (auth) {
@@ -880,7 +851,7 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCas
       onUpdate(testCase.id, 'evidencia', dataUrl);
     };
     reader.onerror = () => {
-        toast({ title: "Error al leer el archivo", variant: "destructive" });
+        toast({ title: "Error al leer el archivo", description: "No se pudo procesar la imagen seleccionada.", variant: "destructive" });
     }
     reader.readAsDataURL(file);
   };

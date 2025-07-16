@@ -320,7 +320,7 @@ const TestwareDashboard: React.FC = () => {
             const newTc = { ...tc, [field]: value };
             if (field === 'estado') {
                 newTc.updatedBy = user?.email || 'System';
-                newTc.updatedAt = serverTimestamp();
+                newTc.updatedAt = new Date();
             }
             return newTc;
         }

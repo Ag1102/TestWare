@@ -49,7 +49,7 @@ import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from "@/lib/utils";
 import { db, auth, storage } from "@/lib/firebase";
-import { doc, setDoc, getDoc, onSnapshot, updateDoc, serverTimestamp, type Unsubscribe, Timestamp } from "firebase/firestore";
+import { doc, setDoc, getDoc, onSnapshot, updateDoc, Timestamp } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 
@@ -172,7 +172,7 @@ const TestwareDashboard: React.FC = () => {
   }, [router]);
 
   useEffect(() => {
-    let unsubscribeDb: Unsubscribe | undefined;
+    let unsubscribeDb: ReturnType<typeof onSnapshot> | undefined;
 
     if (sessionCode) {
       setIsLoadingSession(true);
@@ -216,7 +216,7 @@ const TestwareDashboard: React.FC = () => {
     const newCode = generateSessionCode();
     try {
       const sessionDocRef = doc(db, "sessions", newCode);
-      await setDoc(sessionDocRef, { testCases: [], createdAt: serverTimestamp() });
+      await setDoc(sessionDocRef, { testCases: [], createdAt: Timestamp.fromDate(new Date()) });
       setSessionCode(newCode);
       setIsViewerMode(false); // Creator is always an editor
       toast({ title: "Sesión Creada", description: `El código es: ${newCode}` });

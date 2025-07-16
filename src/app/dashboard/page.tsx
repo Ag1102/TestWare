@@ -1059,7 +1059,10 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
     }
     setIsLoading(true);
     setImpactAnalysis(null);
-    const aiCases = failedCases.map(({ id, updatedBy, updatedAt, ...rest }) => ({ ...rest, estado: 'Fallido' as const }));
+    const aiCases = failedCases.map(({ id, updatedBy, updatedAt, ...rest }) => ({ 
+      ...rest, 
+      estado: 'Fallido' as const 
+    }));
     
     try {
       const result = await generateReportAction({ failedTestCases: aiCases, reportDescription });

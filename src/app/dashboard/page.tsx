@@ -48,8 +48,9 @@ import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from "@/lib/utils";
-import { db, auth } from "@/lib/firebase";
+import { db, auth, storage } from "@/lib/firebase";
 import { doc, setDoc, getDoc, onSnapshot, updateDoc, serverTimestamp, type Unsubscribe, Timestamp } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 
 
@@ -326,18 +327,6 @@ const TestwareDashboard: React.FC = () => {
         }
         return tc;
     });
-
-    const testCaseToUpdate = updatedCases.find(tc => tc.id === id);
-  
-    if (field === 'estado' && value === 'Fallido' && testCaseToUpdate) {
-      if (!testCaseToUpdate.comentarios?.trim() || !testCaseToUpdate.evidencia?.trim()) {
-        toast({
-          title: "Información Requerida",
-          description: "Comentarios y Evidencia son requeridos para marcar como Fallido.",
-          variant: "destructive",
-        });
-      }
-    }
     updateFirestoreTestCases(updatedCases);
   }, [testCases, toast, updateFirestoreTestCases, user]);
   
@@ -570,7 +559,7 @@ const TestwareDashboard: React.FC = () => {
             ) : (
             <div className="space-y-6">
               {filteredCases.map((tc) => (
-                <TestCaseCard key={tc.id} testCase={tc} onUpdate={handleUpdate} onDelete={handleDeleteTestCase} />
+                <TestCaseCard key={tc.id} testCase={tc} onUpdate={handleUpdate} onDelete={handleDeleteTestCase} sessionCode={sessionCode} />
               ))}
               {filteredCases.length === 0 && (
                 <div className="text-center py-10 text-muted-foreground">No hay casos de prueba que coincidan con los filtros actuales.</div>
@@ -867,12 +856,14 @@ const ViewerDashboardContent = ({ stats, cases, currentFilter, setFilter }) => {
     );
 };
 
-const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false }: { testCase: TestCase, onUpdate?: Function, onDelete?: Function, isViewerMode?: boolean }) => {
+const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false, sessionCode }: { testCase: TestCase, onUpdate?: Function, onDelete?: Function, isViewerMode?: boolean, sessionCode?: string | null }) => {
   const evidenceInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  const [isUploading, setIsUploading] = useState(false);
 
-  const handleEvidenceSelect = (e: ChangeEvent<HTMLInputElement>) => {
-    if (isViewerMode) return;
+
+  const handleEvidenceSelect = async (e: ChangeEvent<HTMLInputElement>) => {
+    if (isViewerMode || !storage || !sessionCode) return;
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -886,16 +877,19 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
       return;
     }
     
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      onUpdate?.(testCase.id, 'evidencia', dataUrl);
-    };
-    reader.onerror = (err) => {
-        toast({ title: "Error al leer el archivo", description: "No se pudo procesar la imagen seleccionada.", variant: "destructive" });
-        console.error("Error reading file:", err);
+    setIsUploading(true);
+    try {
+      const evidenceRef = ref(storage, `sessions/${sessionCode}/evidence/${testCase.id}/${file.name}`);
+      await uploadBytes(evidenceRef, file);
+      const downloadURL = await getDownloadURL(evidenceRef);
+      onUpdate?.(testCase.id, 'evidencia', downloadURL);
+      toast({ title: "Evidencia Subida", description: "La imagen se ha guardado correctamente." });
+    } catch(error) {
+      console.error("Error uploading to Firebase Storage:", error);
+      toast({ title: "Error al subir", description: "No se pudo guardar la evidencia.", variant: "destructive" });
+    } finally {
+      setIsUploading(false);
     }
-    reader.readAsDataURL(file);
   };
   
   const formatTimestamp = (timestamp: any) => {
@@ -907,6 +901,9 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
       return 'Fecha inválida';
     }
   };
+
+  const isDataUrl = testCase.evidencia && testCase.evidencia.startsWith('data:image');
+  const isFirebaseUrl = testCase.evidencia && testCase.evidencia.includes('firebasestorage.googleapis.com');
 
   return (
     <Card className="overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300">
@@ -997,7 +994,7 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
                 onBlur={e => onUpdate?.(testCase.id, 'evidencia', e.target.value)}
                 placeholder={testCase.estado === 'Fallido' ? 'URL de evidencia requerida' : 'Pega la URL o carga una imagen'}
                 className="bg-background/50"
-                readOnly={isViewerMode}
+                readOnly={isViewerMode || isUploading}
               />
                {!isViewerMode && (
                 <>
@@ -1007,20 +1004,19 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
                     className="hidden"
                     accept="image/*"
                     onChange={handleEvidenceSelect}
-                    disabled={isViewerMode}
+                    disabled={isViewerMode || isUploading}
                   />
-                  <Button variant="outline" onClick={() => evidenceInputRef.current?.click()} disabled={isViewerMode}>
-                    <Upload className="h-4 w-4"/>
+                  <Button variant="outline" onClick={() => evidenceInputRef.current?.click()} disabled={isViewerMode || isUploading}>
+                    {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4"/>}
                   </Button>
                 </>
               )}
             </div>
-            {testCase.evidencia && testCase.evidencia.startsWith('data:image') && (
+            {(isDataUrl || isFirebaseUrl) ? (
               <a href={testCase.evidencia} target="_blank" rel="noopener noreferrer" className="mt-2 block">
                 <img src={testCase.evidencia} alt="Vista previa de la evidencia" data-ai-hint="evidence screenshot" className="w-full rounded-md object-cover max-h-48 hover:opacity-80 transition-opacity border" />
               </a>
-            )}
-            {testCase.evidencia && !testCase.evidencia.startsWith('data:image') && (
+            ) : testCase.evidencia && (
               <a href={testCase.evidencia} target="_blank" rel="noopener noreferrer" className="mt-2 text-primary hover:underline text-sm break-all">
                 {testCase.evidencia}
               </a>
@@ -1200,7 +1196,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                 renderField('Comentarios de QA:', tc.comentarios, false, [192, 57, 43]);
                 
                 addTextBox('Evidencia:', { fontSize: 10, fontStyle: 'bold' });
-                if (tc.evidencia && tc.evidencia.startsWith('data:image')) {
+                if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.includes('firebasestorage'))) {
                     try {
                         const { width, height } = await getImageDimensions(tc.evidencia);
                         const imgWidth = contentWidth / 2;
@@ -1474,7 +1470,7 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
                 fieldsToEstimate.forEach(field => {
                   estimatedHeight += (pdf.splitTextToSize(field || '-', contentWidth).length * (pdf.getLineHeight() / pdf.internal.scaleFactor) + 4);
                 })
-                if (tc.evidencia) estimatedHeight += (tc.evidencia.startsWith('data:image') ? 50 : 15);
+                if (tc.evidencia) estimatedHeight += (tc.evidencia.startsWith('data:image') || tc.evidencia.includes('firebasestorage')) ? 50 : 15;
 
                 if (y + estimatedHeight > pdfHeight - margin) {
                     pdf.addPage();
@@ -1503,7 +1499,7 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
                 }
                 
                 addTextBox('Evidencia:', { fontSize: 10, fontStyle: 'bold' });
-                if (tc.evidencia && tc.evidencia.startsWith('data:image')) {
+                if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.includes('firebasestorage'))) {
                     try {
                         const { width, height } = await getImageDimensions(tc.evidencia);
                         const imgWidth = contentWidth / 2;
@@ -1663,5 +1659,3 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
 
 
 export default TestwareDashboard;
-
-    

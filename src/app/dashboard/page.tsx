@@ -49,7 +49,7 @@ import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from "@/lib/utils";
 import { db, auth } from "@/lib/firebase";
-import { doc, setDoc, getDoc, onSnapshot, updateDoc, serverTimestamp, type Unsubscribe } from "firebase/firestore";
+import { doc, setDoc, getDoc, onSnapshot, updateDoc, serverTimestamp, type Unsubscribe, Timestamp } from "firebase/firestore";
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 
 
@@ -320,7 +320,7 @@ const TestwareDashboard: React.FC = () => {
             const newTc = { ...tc, [field]: value };
             if (field === 'estado') {
                 newTc.updatedBy = user?.email || 'System';
-                newTc.updatedAt = new Date();
+                newTc.updatedAt = Timestamp.fromDate(new Date());
             }
             return newTc;
         }
@@ -1212,7 +1212,9 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                         }
                         pdf.addImage(tc.evidencia, 'PNG', margin, y, imgWidth, imgHeight, undefined, 'FAST');
                         y += imgHeight + 5;
-                    } catch (e) { addTextBox('Error al cargar imagen', {}); }
+                    } catch (e) { 
+                        addTextBox('Error al cargar imagen. La evidencia puede estar corrupta o no ser una imagen.', { color: [192, 57, 43], fontSize: 10 });
+                    }
                 } else if (tc.evidencia) {
                     addTextBox(tc.evidencia, { color: [41, 128, 185], fontSize: 10 });
                 } else {
@@ -1512,7 +1514,9 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
                         }
                         pdf.addImage(tc.evidencia, 'PNG', margin, y, imgWidth, imgHeight, undefined, 'FAST');
                         y += imgHeight + 5;
-                    } catch (e) { addTextBox('Error al cargar imagen', {}); }
+                    } catch (e) {
+                         addTextBox('Error al cargar imagen. La evidencia puede estar corrupta o no ser una imagen.', { color: [192, 57, 43], fontSize: 10 });
+                    }
                 } else if (tc.evidencia) {
                     addTextBox(tc.evidencia, { color: [41, 128, 185], fontSize: 10 });
                 } else {

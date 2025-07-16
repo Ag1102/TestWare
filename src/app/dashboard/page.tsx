@@ -141,20 +141,18 @@ const TestwareDashboard: React.FC = () => {
   
   const [isViewerMode, setIsViewerMode] = useState(false);
   const [joinAsViewer, setJoinAsViewer] = useState(false);
+  const [viewerFilter, setViewerFilter] = useState<TestCaseStatus | 'all'>('all');
 
   const handleLeaveSession = useCallback(() => {
     setSessionCode(null);
     setTestCases([]);
     setInputCode('');
     setIsViewerMode(false);
+    setViewerFilter('all');
   }, []);
 
   useEffect(() => {
-    if (!auth) {
-      router.push('/');
-      return;
-    }
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser) {
         setUser(currentUser);
       } else {
@@ -162,17 +160,18 @@ const TestwareDashboard: React.FC = () => {
       }
       setIsAuthLoading(false);
     });
-    return () => unsubscribe();
+    
+    return () => unsubscribeAuth();
   }, [router]);
 
   useEffect(() => {
-    let unsubscribe: Unsubscribe | undefined;
+    let unsubscribeDb: Unsubscribe | undefined;
 
-    if (db && sessionCode) {
+    if (sessionCode) {
       setIsLoadingSession(true);
       const sessionDocRef = doc(db, "sessions", sessionCode);
 
-      unsubscribe = onSnapshot(sessionDocRef, (docSnap) => {
+      unsubscribeDb = onSnapshot(sessionDocRef, (docSnap) => {
         if (docSnap.exists()) {
           const data = docSnap.data();
           setTestCases(data.testCases || []);
@@ -190,16 +189,15 @@ const TestwareDashboard: React.FC = () => {
     }
 
     return () => {
-      if (unsubscribe) {
-        unsubscribe();
+      if (unsubscribeDb) {
+        unsubscribeDb();
       }
     };
   }, [sessionCode, toast, handleLeaveSession]);
 
   const handleLogout = async () => {
-    if (auth) {
-      await signOut(auth);
-    }
+    await signOut(auth);
+    router.push('/');
   };
 
   const handleCreateSession = async () => {
@@ -239,6 +237,7 @@ const TestwareDashboard: React.FC = () => {
       if (docSnap.exists()) {
         setSessionCode(inputCode.trim().toUpperCase());
         setIsViewerMode(joinAsViewer);
+        setViewerFilter('all');
       } else {
         toast({ title: "Sesión no encontrada", description: "El código ingresado no es válido.", variant: "destructive" });
       }
@@ -251,7 +250,7 @@ const TestwareDashboard: React.FC = () => {
   };
 
   const updateFirestoreTestCases = useCallback(async (updatedCases: TestCase[]) => {
-    if (db && sessionCode) {
+    if (sessionCode) {
       try {
         const sessionDocRef = doc(db, "sessions", sessionCode);
         await updateDoc(sessionDocRef, { testCases: updatedCases });
@@ -267,11 +266,16 @@ const TestwareDashboard: React.FC = () => {
   const commentedCases = useMemo(() => testCases.filter(tc => tc.comentarios?.trim()), [testCases]);
 
   const filteredCases = useMemo(() => {
+    if (isViewerMode) {
+      return viewerFilter === 'all'
+        ? testCases
+        : testCases.filter(tc => tc.estado === viewerFilter);
+    }
     return testCases.filter(tc =>
       (filterProcess === 'all' || tc.proceso === filterProcess) &&
       (filterStatus === 'all' || tc.estado === filterStatus)
     );
-  }, [testCases, filterProcess, filterStatus]);
+  }, [testCases, filterProcess, filterStatus, isViewerMode, viewerFilter]);
 
   const stats = useMemo(() => {
     const total = testCases.length;
@@ -374,10 +378,12 @@ const TestwareDashboard: React.FC = () => {
                 <h1 className="text-2xl font-bold tracking-tight font-headline">TESTWARE</h1>
               </div>
               <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <UserIcon className="h-4 w-4" />
-                    <span>{user?.email}</span>
-                  </div>
+                  {user && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <UserIcon className="h-4 w-4" />
+                      <span>{user?.email}</span>
+                    </div>
+                  )}
                   <Button variant="outline" onClick={handleLogout}><Power /> Cerrar Sesión</Button>
               </div>
             </div>
@@ -439,45 +445,51 @@ const TestwareDashboard: React.FC = () => {
 
   return (
     <div className="flex min-h-screen bg-background text-foreground font-body">
-      <div className="hidden md:block">
-        <Sidebar 
-          stats={stats}
-          processes={processes}
-          filterProcess={filterProcess}
-          setFilterProcess={setFilterProcess}
-          filterStatus={filterStatus}
-          setFilterStatus={setFilterStatus}
-        />
-      </div>
-       <Sheet open={isMobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-        <SheetContent side="left" className="p-0 w-80">
-          <SheetHeader className="sr-only">
-            <SheetTitle>Menú Principal</SheetTitle>
-          </SheetHeader>
-          <Sidebar 
-            stats={stats}
-            processes={processes}
-            filterProcess={filterProcess}
-            setFilterProcess={setFilterProcess}
-            filterStatus={filterStatus}
-            setFilterStatus={setFilterStatus}
-          />
-        </SheetContent>
-      </Sheet>
+      {!isViewerMode && (
+        <>
+          <div className="hidden md:block">
+            <Sidebar 
+              stats={stats}
+              processes={processes}
+              filterProcess={filterProcess}
+              setFilterProcess={setFilterProcess}
+              filterStatus={filterStatus}
+              setFilterStatus={setFilterStatus}
+            />
+          </div>
+           <Sheet open={isMobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+            <SheetContent side="left" className="p-0 w-80">
+              <SheetHeader className="sr-only">
+                <SheetTitle>Menú Principal</SheetTitle>
+              </SheetHeader>
+              <Sidebar 
+                stats={stats}
+                processes={processes}
+                filterProcess={filterProcess}
+                setFilterProcess={setFilterProcess}
+                filterStatus={filterStatus}
+                setFilterStatus={setFilterStatus}
+              />
+            </SheetContent>
+          </Sheet>
+        </>
+      )}
 
       <div className="flex-1 flex flex-col">
         <header className="sticky top-0 z-10 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="container flex h-16 items-center justify-between">
             <div className="flex gap-2 items-center">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="md:hidden"
-                  onClick={() => setMobileSidebarOpen(true)}
-                >
-                  <PanelLeft />
-                  <span className="sr-only">Toggle Menu</span>
-                </Button>
+                {!isViewerMode && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="md:hidden"
+                    onClick={() => setMobileSidebarOpen(true)}
+                  >
+                    <PanelLeft />
+                    <span className="sr-only">Toggle Menu</span>
+                  </Button>
+                )}
               <TestwareLogo className="hidden sm:block"/>
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight font-headline">TESTWARE</h1>
             </div>
@@ -540,7 +552,12 @@ const TestwareDashboard: React.FC = () => {
                 <p className="ml-4">Cargando sesión...</p>
              </div>
           ) : isViewerMode ? (
-              <ViewerDashboardContent stats={stats} />
+              <ViewerDashboardContent
+                stats={stats}
+                cases={filteredCases}
+                currentFilter={viewerFilter}
+                setFilter={setViewerFilter}
+              />
           ) : !testCases.length ? (
               <div className="text-center py-20">
                 <Share2 className="mx-auto h-12 w-12 text-muted-foreground" />
@@ -736,7 +753,7 @@ const Sidebar = ({ stats, processes, filterProcess, setFilterProcess, filterStat
     )
 };
 
-const ViewerDashboardContent = ({ stats }) => {
+const ViewerDashboardContent = ({ stats, cases, currentFilter, setFilter }) => {
     const chartData = useMemo(() => [
         { name: 'Aprobados', value: stats.passed, fill: 'hsl(var(--chart-1))' },
         { name: 'Fallidos', value: stats.failed, fill: 'hsl(var(--chart-2))' },
@@ -751,6 +768,10 @@ const ViewerDashboardContent = ({ stats }) => {
       'N/A': { label: 'N/A', color: 'hsl(var(--chart-3))' },
       Pendientes: { label: 'Pendientes', color: 'hsl(var(--chart-4))' },
     } satisfies ChartConfig;
+
+    const handleFilterClick = (status: TestCaseStatus) => {
+        setFilter(current => current === status ? 'all' : status);
+    };
 
     if (stats.total === 0) {
       return (
@@ -769,7 +790,7 @@ const ViewerDashboardContent = ({ stats }) => {
                 <p className="text-muted-foreground">Estás viendo el progreso de la sesión en tiempo real. No puedes realizar ediciones.</p>
             </div>
             
-            <Card className="max-w-3xl mx-auto">
+            <Card className="max-w-4xl mx-auto">
                 <CardHeader>
                     <CardTitle>Progreso General</CardTitle>
                 </CardHeader>
@@ -781,57 +802,77 @@ const ViewerDashboardContent = ({ stats }) => {
                         </div>
                     </div>
                      <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-                        <div className="p-3 bg-green-100 dark:bg-green-900/50 rounded-lg"><p className="text-2xl font-bold text-green-600">{stats.passed}</p><p className="text-sm font-medium text-muted-foreground">Aprobados</p></div>
-                        <div className="p-3 bg-red-100 dark:bg-red-900/50 rounded-lg"><p className="text-2xl font-bold text-red-600">{stats.failed}</p><p className="text-sm font-medium text-muted-foreground">Fallidos</p></div>
-                        <div className="p-3 bg-yellow-100 dark:bg-yellow-900/50 rounded-lg"><p className="text-2xl font-bold text-yellow-600">{stats.pending}</p><p className="text-sm font-medium text-muted-foreground">Pendientes</p></div>
-                        <div className="p-3 bg-gray-100 dark:bg-gray-900/50 rounded-lg"><p className="text-2xl font-bold text-gray-500">{stats.na}</p><p className="text-sm font-medium text-muted-foreground">N/A</p></div>
+                        <div onClick={() => handleFilterClick('Passed')} className={cn("p-3 bg-green-100 dark:bg-green-900/50 rounded-lg cursor-pointer transition-transform hover:scale-105", {'ring-2 ring-primary': currentFilter === 'Passed'})}><p className="text-2xl font-bold text-green-600">{stats.passed}</p><p className="text-sm font-medium text-muted-foreground">Aprobados</p></div>
+                        <div onClick={() => handleFilterClick('Failed')} className={cn("p-3 bg-red-100 dark:bg-red-900/50 rounded-lg cursor-pointer transition-transform hover:scale-105", {'ring-2 ring-primary': currentFilter === 'Failed'})}><p className="text-2xl font-bold text-red-600">{stats.failed}</p><p className="text-sm font-medium text-muted-foreground">Fallidos</p></div>
+                        <div onClick={() => handleFilterClick('pending')} className={cn("p-3 bg-yellow-100 dark:bg-yellow-900/50 rounded-lg cursor-pointer transition-transform hover:scale-105", {'ring-2 ring-primary': currentFilter === 'pending'})}><p className="text-2xl font-bold text-yellow-600">{stats.pending}</p><p className="text-sm font-medium text-muted-foreground">Pendientes</p></div>
+                        <div onClick={() => handleFilterClick('N/A')} className={cn("p-3 bg-gray-100 dark:bg-gray-900/50 rounded-lg cursor-pointer transition-transform hover:scale-105", {'ring-2 ring-primary': currentFilter === 'N/A'})}><p className="text-2xl font-bold text-gray-500">{stats.na}</p><p className="text-sm font-medium text-muted-foreground">N/A</p></div>
                     </div>
                 </CardContent>
             </Card>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
-                <Card id="viewer-pie-chart-card">
-                    <CardHeader className="items-center pb-2">
-                        <CardTitle>Visión General</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <ChartContainer config={chartConfig} className="mx-auto aspect-square max-h-[350px]">
-                            <RechartsPieChart>
-                                <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
-                                <Pie data={chartData} dataKey="value" nameKey="name" innerRadius={70} strokeWidth={5}>
-                                    {chartData.map((entry) => <Cell key={`cell-${entry.name}`} fill={entry.fill} />)}
-                                </Pie>
-                            </RechartsPieChart>
-                        </ChartContainer>
-                    </CardContent>
-                </Card>
-                <Card id="viewer-bar-chart-card">
-                    <CardHeader className="items-center pb-2">
-                        <CardTitle>Resumen por Estado</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <ChartContainer config={chartConfig} className="w-full h-[350px]">
-                            <BarChart accessibilityLayer data={chartData} layout="vertical" margin={{ left: 20, right: 20 }}>
-                                <YAxis dataKey="name" type="category" tickLine={false} tickMargin={10} axisLine={false} tickFormatter={(value) => value} width={80} />
-                                <XAxis dataKey="value" type="number" hide />
-                                <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
-                                <Bar dataKey="value" layout="vertical" radius={5}>
-                                    {chartData.map((entry) => <Cell key={`cell-${entry.name}`} fill={entry.fill} />)}
-                                </Bar>
-                            </BarChart>
-                        </ChartContainer>
-                    </CardContent>
-                </Card>
-            </div>
+            {currentFilter !== 'all' && (
+              <div className="space-y-6">
+                 <div className="flex justify-between items-center">
+                  <h3 className="text-2xl font-bold">
+                    Viendo {cases.length} caso(s) con estado "{statusMap[currentFilter]}"
+                  </h3>
+                  <Button variant="outline" onClick={() => setFilter('all')}>Mostrar Todos</Button>
+                </div>
+                {cases.map((tc) => (
+                  <TestCaseCard key={tc.id} testCase={tc} isViewerMode={true} />
+                ))}
+                {cases.length === 0 && (
+                   <div className="text-center py-10 text-muted-foreground">No hay casos con el estado "{statusMap[currentFilter]}".</div>
+                )}
+              </div>
+            )}
+
+            {currentFilter === 'all' && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
+                  <Card id="viewer-pie-chart-card">
+                      <CardHeader className="items-center pb-2">
+                          <CardTitle>Visión General</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                          <ChartContainer config={chartConfig} className="mx-auto aspect-square max-h-[350px]">
+                              <RechartsPieChart>
+                                  <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
+                                  <Pie data={chartData} dataKey="value" nameKey="name" innerRadius={70} strokeWidth={5}>
+                                      {chartData.map((entry) => <Cell key={`cell-${entry.name}`} fill={entry.fill} />)}
+                                  </Pie>
+                              </RechartsPieChart>
+                          </ChartContainer>
+                      </CardContent>
+                  </Card>
+                  <Card id="viewer-bar-chart-card">
+                      <CardHeader className="items-center pb-2">
+                          <CardTitle>Resumen por Estado</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                          <ChartContainer config={chartConfig} className="w-full h-[350px]">
+                              <BarChart accessibilityLayer data={chartData} layout="vertical" margin={{ left: 20, right: 20 }}>
+                                  <YAxis dataKey="name" type="category" tickLine={false} tickMargin={10} axisLine={false} tickFormatter={(value) => value} width={80} />
+                                  <XAxis dataKey="value" type="number" hide />
+                                  <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
+                                  <Bar dataKey="value" layout="vertical" radius={5}>
+                                      {chartData.map((entry) => <Cell key={`cell-${entry.name}`} fill={entry.fill} />)}
+                                  </Bar>
+                              </BarChart>
+                          </ChartContainer>
+                      </CardContent>
+                  </Card>
+              </div>
+            )}
         </div>
     );
 };
 
-const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCase, onUpdate: Function, onDelete: Function }) => {
+const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false }: { testCase: TestCase, onUpdate?: Function, onDelete?: Function, isViewerMode?: boolean }) => {
   const evidenceInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const handleEvidenceSelect = (e: ChangeEvent<HTMLInputElement>) => {
+    if (isViewerMode) return;
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -848,10 +889,11 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCas
     const reader = new FileReader();
     reader.onload = (event) => {
       const dataUrl = event.target?.result as string;
-      onUpdate(testCase.id, 'evidencia', dataUrl);
+      onUpdate?.(testCase.id, 'evidencia', dataUrl);
     };
-    reader.onerror = () => {
+    reader.onerror = (err) => {
         toast({ title: "Error al leer el archivo", description: "No se pudo procesar la imagen seleccionada.", variant: "destructive" });
+        console.error("Error reading file:", err);
     }
     reader.readAsDataURL(file);
   };
@@ -884,9 +926,10 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCas
         <div className="flex items-center gap-2 flex-shrink-0">
             <Select
               value={testCase.estado}
-              onValueChange={(value) => onUpdate(testCase.id, 'estado', value as TestCaseStatus)}
+              onValueChange={(value) => onUpdate?.(testCase.id, 'estado', value as TestCaseStatus)}
+              disabled={isViewerMode}
             >
-              <SelectTrigger className="w-[150px] font-semibold">
+              <SelectTrigger className="w-[150px] font-semibold" disabled={isViewerMode}>
                 <SelectValue placeholder="Seleccionar estado..." />
               </SelectTrigger>
               <SelectContent>
@@ -901,25 +944,27 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCas
                   ))}
               </SelectContent>
             </Select>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive">
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Esta acción no se puede deshacer. Esto eliminará permanentemente el caso de prueba.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => onDelete(testCase.id)}>Eliminar</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+            {!isViewerMode && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive">
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Esta acción no se puede deshacer. Esto eliminará permanentemente el caso de prueba.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => onDelete?.(testCase.id)}>Eliminar</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
         </div>
       </CardHeader>
       <CardContent className="p-6 space-y-6">
@@ -935,9 +980,10 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCas
               id={`comments-${testCase.id}`}
               key={`comments-${testCase.id}`} // Force re-render if case changes
               defaultValue={testCase.comentarios}
-              onBlur={(e) => onUpdate(testCase.id, 'comentarios', e.target.value)}
+              onBlur={(e) => onUpdate?.(testCase.id, 'comentarios', e.target.value)}
               className="min-h-[100px] bg-background/50"
               placeholder={testCase.estado === 'Failed' ? 'Razón del fallo requerida' : 'Comentarios adicionales...'}
+              readOnly={isViewerMode}
             />
           </div>
 
@@ -948,20 +994,26 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete }: { testCase: TestCas
                 id={`evidence-input-${testCase.id}`}
                 key={`evidence-${testCase.id}`}
                 defaultValue={testCase.evidencia}
-                onBlur={e => onUpdate(testCase.id, 'evidencia', e.target.value)}
+                onBlur={e => onUpdate?.(testCase.id, 'evidencia', e.target.value)}
                 placeholder={testCase.estado === 'Failed' ? 'URL de evidencia requerida' : 'Pega la URL o carga una imagen'}
                 className="bg-background/50"
+                readOnly={isViewerMode}
               />
-              <input
-                type="file"
-                ref={evidenceInputRef}
-                className="hidden"
-                accept="image/*"
-                onChange={handleEvidenceSelect}
-              />
-              <Button variant="outline" onClick={() => evidenceInputRef.current?.click()}>
-                <Upload className="h-4 w-4"/>
-              </Button>
+               {!isViewerMode && (
+                <>
+                  <input
+                    type="file"
+                    ref={evidenceInputRef}
+                    className="hidden"
+                    accept="image/*"
+                    onChange={handleEvidenceSelect}
+                    disabled={isViewerMode}
+                  />
+                  <Button variant="outline" onClick={() => evidenceInputRef.current?.click()} disabled={isViewerMode}>
+                    <Upload className="h-4 w-4"/>
+                  </Button>
+                </>
+              )}
             </div>
             {testCase.evidencia && testCase.evidencia.startsWith('data:image') && (
               <a href={testCase.evidencia} target="_blank" rel="noopener noreferrer" className="mt-2 block">
@@ -1604,3 +1656,5 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
 
 
 export default TestwareDashboard;
+
+    

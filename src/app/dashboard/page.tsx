@@ -49,7 +49,7 @@ import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from "@/lib/utils";
 import { db, auth } from "@/lib/firebase";
-import { doc, setDoc, getDoc, onSnapshot, updateDoc, type Unsubscribe } from "firebase/firestore";
+import { doc, setDoc, getDoc, onSnapshot, updateDoc, serverTimestamp, type Unsubscribe } from "firebase/firestore";
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 
 
@@ -209,7 +209,7 @@ const TestwareDashboard: React.FC = () => {
     const newCode = generateSessionCode();
     try {
       const sessionDocRef = doc(db, "sessions", newCode);
-      await setDoc(sessionDocRef, { testCases: [], createdAt: new Date() });
+      await setDoc(sessionDocRef, { testCases: [], createdAt: serverTimestamp() });
       setSessionCode(newCode);
       setIsViewerMode(false); // Creator is always an editor
       toast({ title: "Sesión Creada", description: `El código es: ${newCode}` });
@@ -320,7 +320,7 @@ const TestwareDashboard: React.FC = () => {
             const newTc = { ...tc, [field]: value };
             if (field === 'estado') {
                 newTc.updatedBy = user?.email || 'System';
-                newTc.updatedAt = new Date();
+                newTc.updatedAt = serverTimestamp();
             }
             return newTc;
         }

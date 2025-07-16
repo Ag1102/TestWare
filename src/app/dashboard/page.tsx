@@ -54,17 +54,23 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 
 
-const getImageDimensions = (dataUri: string): Promise<{ width: number; height: number }> => {
+const getImageDimensions = (uri: string): Promise<{ width: number; height: number }> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
+    
+    // This enables cross-origin loading for images from Firebase Storage
+    if (uri.startsWith('https://')) {
+      img.crossOrigin = "Anonymous";
+    }
+
     img.onload = () => {
       resolve({ width: img.width, height: img.height });
     };
     img.onerror = (err) => {
-      console.error("Failed to load image for dimension calculation", err);
+      console.error("Failed to load image for dimension calculation", err, "URI:", uri);
       reject(new Error("Failed to load image for dimension calculation"));
     };
-    img.src = dataUri;
+    img.src = uri;
   });
 };
 
@@ -1166,7 +1172,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                 fieldsToEstimate.forEach(field => {
                   estimatedHeight += (pdf.splitTextToSize(field || '-', contentWidth).length * (pdf.getLineHeight() / pdf.internal.scaleFactor) + 4);
                 })
-                if (tc.evidencia && tc.evidencia.startsWith('data:image')) {
+                if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.includes('firebasestorage'))) {
                     estimatedHeight += 50;
                 } else if (tc.evidencia) {
                     estimatedHeight += 15;

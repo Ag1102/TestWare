@@ -1059,7 +1059,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
     }
     setIsLoading(true);
     setImpactAnalysis(null);
-    const aiCases = failedCases.map(({ id, ...rest }) => ({ ...rest, estado: 'Fallido' }));
+    const aiCases = failedCases.map(({ id, updatedBy, updatedAt, ...rest }) => ({ ...rest, estado: 'Fallido' as const }));
     
     try {
       const result = await generateReportAction({ failedTestCases: aiCases, reportDescription });
@@ -1372,7 +1372,7 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
     }
     setIsLoading(true);
     setAnalysis(null);
-    const aiCases = commentedCases.map(({ id, ...rest }) => rest);
+    const aiCases = commentedCases.map(({ id, updatedAt, updatedBy, ...rest }) => rest);
     
     try {
       const result = await generateImprovementReportAction({ commentedTestCases: aiCases, reportDescription });

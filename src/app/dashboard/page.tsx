@@ -50,20 +50,21 @@ import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from "@/lib/utils";
-import { db, auth } from "@/lib/firebase";
+import { db, auth, storage } from "@/lib/firebase";
 import { doc, setDoc, getDoc, onSnapshot, updateDoc, Timestamp, collection, addDoc, deleteDoc, query, where, getDocs, writeBatch, serverTimestamp } from "firebase/firestore";
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import * as XLSX from 'xlsx';
 
 const getImageDimensions = (uri: string): Promise<{ width: number; height: number }> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.crossOrigin = "Anonymous"; 
+    img.crossOrigin = "Anonymous";
     img.onload = () => {
       resolve({ width: img.width, height: img.height });
     };
     img.onerror = (err) => {
-      console.error("Failed to load image for dimension calculation", err);
+      console.error("Failed to load image for dimension calculation", uri, err);
       reject(new Error("Failed to load image for dimension calculation"));
     };
     img.src = uri;
@@ -454,24 +455,8 @@ const TestwareDashboard: React.FC = () => {
   };
 
 
-  const handleUpdate = useCallback((id: string, field: keyof TestCase, value: string | TestCaseStatus | File) => {
-    let casesToUpdate = [...testCases];
-
-    if (field === 'evidencia' && value instanceof File) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const dataUrl = e.target?.result as string;
-        const finalCases = testCases.map(tc => 
-          tc.id === id ? { ...tc, evidencia: dataUrl } : tc
-        );
-        updateFirestoreTestCases(finalCases);
-      };
-      reader.readAsDataURL(value);
-      // We don't update the state here, we let the async operation finish and update firestore
-      return;
-    }
-
-    casesToUpdate = testCases.map(tc => {
+  const handleUpdate = useCallback((id: string, field: keyof TestCase, value: string | TestCaseStatus) => {
+    const updatedCases = testCases.map(tc => {
         if (tc.id === id) {
             const newTc: TestCase = { ...tc, [field]: value };
             if (field === 'estado') {
@@ -483,7 +468,7 @@ const TestwareDashboard: React.FC = () => {
         return tc;
     });
 
-    updateFirestoreTestCases(casesToUpdate);
+    updateFirestoreTestCases(updatedCases);
   }, [testCases, updateFirestoreTestCases, user]);
   
   const handleDeleteTestCase = useCallback((id: string) => {
@@ -725,7 +710,15 @@ const TestwareDashboard: React.FC = () => {
             ) : (
             <div className="space-y-6">
               {filteredCases.map((tc) => (
-                <TestCaseCard key={tc.id} testCase={tc} onUpdate={handleUpdate} onDelete={handleDeleteTestCase} />
+                <TestCaseCard 
+                  key={tc.id} 
+                  testCase={tc} 
+                  onUpdate={handleUpdate} 
+                  onDelete={handleDeleteTestCase} 
+                  sessionCode={sessionCode} 
+                  updateFirestoreTestCases={updateFirestoreTestCases} 
+                  allTestCases={testCases}
+                />
               ))}
               {filteredCases.length === 0 && (
                 <div className="text-center py-10 text-muted-foreground">No hay casos de prueba que coincidan con los filtros actuales.</div>
@@ -1066,7 +1059,19 @@ const ViewerDashboardContent = ({ stats, cases, currentFilter, setFilter }) => {
     );
 };
 
-const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false }: { testCase: TestCase, onUpdate?: Function, onDelete?: Function, isViewerMode?: boolean }) => {
+const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false, sessionCode, allTestCases, updateFirestoreTestCases }: { 
+    testCase: TestCase, 
+    onUpdate?: (id: string, field: keyof TestCase, value: string | TestCaseStatus) => void, 
+    onDelete?: (id: string) => void, 
+    isViewerMode?: boolean,
+    sessionCode?: string | null,
+    updateFirestoreTestCases: (cases: TestCase[]) => Promise<void>,
+    allTestCases: TestCase[]
+}) => {
+  const [isUploading, setIsUploading] = useState(false);
+  const evidenceInputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
+
   const formatTimestamp = (timestamp: any) => {
     if (!timestamp) return '';
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -1076,16 +1081,35 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
       return 'Fecha inválida';
     }
   };
-
-  const isImageUrl = testCase.evidencia && (testCase.evidencia.startsWith('data:image') || testCase.evidencia.startsWith('http'));
-  const evidenceInputRef = useRef<HTMLInputElement>(null);
-
-  const handleEvidenceSelect = (e: ChangeEvent<HTMLInputElement>) => {
+  
+  const handleEvidenceSelect = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file && onUpdate) {
-      onUpdate(testCase.id, 'evidencia', file);
+    if (!file || !sessionCode || !storage) {
+        return;
+    }
+    
+    setIsUploading(true);
+    try {
+        const uniqueFileName = `${simpleUUID()}-${file.name}`;
+        const imageRef = storageRef(storage, `sessions/${sessionCode}/${uniqueFileName}`);
+        await uploadBytes(imageRef, file);
+        const downloadURL = await getDownloadURL(imageRef);
+        
+        const updatedCases = allTestCases.map(tc => 
+            tc.id === testCase.id ? { ...tc, evidencia: downloadURL } : tc
+        );
+        await updateFirestoreTestCases(updatedCases);
+
+        toast({ title: 'Éxito', description: 'Evidencia subida correctamente.' });
+    } catch (error) {
+        console.error('Error uploading evidence:', error);
+        toast({ title: 'Error de Subida', description: 'No se pudo subir la evidencia.', variant: 'destructive' });
+    } finally {
+        setIsUploading(false);
     }
   };
+  
+  const isImageUrl = testCase.evidencia && (testCase.evidencia.startsWith('data:image') || testCase.evidencia.startsWith('http'));
 
   return (
     <Card className="overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300">
@@ -1157,7 +1181,7 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
             <Label htmlFor={`comments-${testCase.id}`} className="font-semibold">Comentarios</Label>
             <Textarea
               id={`comments-${testCase.id}`}
-              key={`comments-${testCase.id}`} // Force re-render if case changes
+              key={`comments-${testCase.id}`}
               defaultValue={testCase.comentarios}
               onBlur={(e) => onUpdate?.(testCase.id, 'comentarios', e.target.value)}
               className="min-h-[100px] bg-background/50"
@@ -1175,7 +1199,7 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
                   onBlur={e => onUpdate?.(testCase.id, 'evidencia', e.target.value)}
                   placeholder={'Pega la URL o carga una imagen'}
                   className="bg-background/50 flex-grow"
-                  readOnly={isViewerMode}
+                  readOnly={isViewerMode || isUploading}
                 />
               {!isViewerMode && (
                 <>
@@ -1185,9 +1209,10 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
                     ref={evidenceInputRef}
                     onChange={handleEvidenceSelect}
                     className="hidden"
+                    disabled={isUploading}
                   />
-                  <Button variant="outline" size="icon" onClick={() => evidenceInputRef.current?.click()}>
-                    <Upload className="h-4 w-4" />
+                  <Button variant="outline" size="icon" onClick={() => evidenceInputRef.current?.click()} disabled={isUploading}>
+                    {isUploading ? <Loader2 className="h-4 w-4 animate-spin"/> : <Upload className="h-4 w-4" />}
                   </Button>
                 </>
               )}

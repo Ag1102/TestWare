@@ -1,6 +1,7 @@
 import { initializeApp, getApp, getApps, type FirebaseApp } from "firebase/app";
 import { getFirestore, type Firestore } from "firebase/firestore";
 import { getAuth, type Auth } from "firebase/auth";
+import { getStorage, type FirebaseStorage } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -14,6 +15,7 @@ const firebaseConfig = {
 let app: FirebaseApp;
 let db: Firestore | null = null;
 let auth: Auth | null = null;
+let storage: FirebaseStorage | null = null;
 
 try {
   const requiredConfig = [
@@ -30,6 +32,7 @@ try {
     app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
     db = getFirestore(app);
     auth = getAuth(app);
+    storage = getStorage(app);
   } else {
     if (typeof window !== 'undefined') {
       console.warn("Firebase configuration not found or incomplete in environment variables. Real-time collaboration will be disabled.");
@@ -39,6 +42,7 @@ try {
   console.error("Firebase initialization failed:", e);
   db = null;
   auth = null;
+  storage = null;
 }
 
-export { db, auth };
+export { db, auth, storage };

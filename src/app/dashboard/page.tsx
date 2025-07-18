@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/chart"
 import type { ChartConfig } from "@/components/ui/chart";
 
-import { TestCase, TestCaseStatus } from '@/lib/types';
+import { TestCase, TestCaseStatus, Participant } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -29,6 +29,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,33 +41,35 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { generateReportAction, generateImprovementReportAction } from '@/app/actions';
-import { Upload, Download, Trash2, Bug, Lightbulb, Loader2, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter, PieChart as PieChartIcon, LogIn, PlusCircle, Copy, LogOut, Share2, User as UserIcon, Power, PanelLeft, MoreVertical, FileSpreadsheet } from 'lucide-react';
+import { Upload, Download, Trash2, Bug, Lightbulb, Loader2, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter, PieChart as PieChartIcon, LogIn, PlusCircle, Copy, LogOut, Share2, User as UserIcon, Power, PanelLeft, MoreVertical, FileSpreadsheet, Eye, Pencil } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from "@/lib/utils";
-import { db, auth } from "@/lib/firebase";
-import { doc, setDoc, getDoc, onSnapshot, updateDoc, Timestamp } from "firebase/firestore";
+import { db, auth, storage } from "@/lib/firebase";
+import { doc, setDoc, getDoc, onSnapshot, updateDoc, Timestamp, collection, addDoc, deleteDoc, query, where, getDocs, writeBatch, serverTimestamp } from "firebase/firestore";
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import * as XLSX from 'xlsx';
 
 const getImageDimensions = (uri: string): Promise<{ width: number; height: number }> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
+    img.crossOrigin = "anonymous";
     img.onload = () => {
       resolve({ width: img.width, height: img.height });
     };
     img.onerror = (err) => {
-      console.error("Failed to load image for dimension calculation", err, "URI:", uri.substring(0, 100) + '...');
+      console.error("Failed to load image for dimension calculation", err);
       reject(new Error("Failed to load image for dimension calculation"));
     };
     img.src = uri;
   });
 };
-
 
 const statusMap: Record<TestCaseStatus, string> = {
   'Aprobado': 'Aprobado',
@@ -133,6 +136,9 @@ const TestwareDashboard: React.FC = () => {
   const [inputCode, setInputCode] = useState('');
   const [isLoadingSession, setIsLoadingSession] = useState(false);
   const [testCases, setTestCases] = useState<TestCase[]>([]);
+  const [participants, setParticipants] = useState<Participant[]>([]);
+  const participantIdRef = useRef<string | null>(null);
+
   const [filterProcess, setFilterProcess] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -144,13 +150,27 @@ const TestwareDashboard: React.FC = () => {
   const [joinAsViewer, setJoinAsViewer] = useState(false);
   const [viewerFilter, setViewerFilter] = useState<TestCaseStatus | 'all'>('all');
 
-  const handleLeaveSession = useCallback(() => {
+  const leaveSessionCleanup = useCallback(async () => {
+    if (sessionCode && participantIdRef.current) {
+        try {
+            const participantDocRef = doc(db, "sessions", sessionCode, "participants", participantIdRef.current);
+            await updateDoc(participantDocRef, { online: false });
+        } catch (error) {
+            console.error("Error marking participant as offline:", error);
+        }
+    }
     setSessionCode(null);
     setTestCases([]);
+    setParticipants([]);
+    participantIdRef.current = null;
     setInputCode('');
     setIsViewerMode(false);
     setViewerFilter('all');
-  }, []);
+  }, [sessionCode]);
+
+  const handleLeaveSession = useCallback(async () => {
+    await leaveSessionCleanup();
+  }, [leaveSessionCleanup]);
 
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
@@ -166,12 +186,24 @@ const TestwareDashboard: React.FC = () => {
   }, [router]);
 
   useEffect(() => {
-    let unsubscribeDb: ReturnType<typeof onSnapshot> | undefined;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (sessionCode && participantIdRef.current) {
+        const participantDocRef = doc(db, "sessions", sessionCode, "participants", participantIdRef.current);
+        updateDoc(participantDocRef, { online: false });
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [sessionCode]);
+
+
+  useEffect(() => {
+    let unsubscribeDb: (() => void) | undefined;
+    let unsubscribeParticipants: (() => void) | undefined;
 
     if (sessionCode) {
       setIsLoadingSession(true);
       const sessionDocRef = doc(db, "sessions", sessionCode);
-
       unsubscribeDb = onSnapshot(sessionDocRef, (docSnap) => {
         if (docSnap.exists()) {
           const data = docSnap.data();
@@ -187,32 +219,53 @@ const TestwareDashboard: React.FC = () => {
         setIsLoadingSession(false);
         handleLeaveSession();
       });
+
+      const participantsColRef = collection(db, "sessions", sessionCode, "participants");
+      const q = query(participantsColRef, where("online", "==", true));
+      unsubscribeParticipants = onSnapshot(q, (snapshot) => {
+        const activeParticipants = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Participant));
+        setParticipants(activeParticipants);
+      });
     }
 
     return () => {
-      if (unsubscribeDb) {
-        unsubscribeDb();
-      }
+      if (unsubscribeDb) unsubscribeDb();
+      if (unsubscribeParticipants) unsubscribeParticipants();
     };
   }, [sessionCode, toast, handleLeaveSession]);
 
   const handleLogout = async () => {
+    await leaveSessionCleanup();
     await signOut(auth);
     router.push('/');
   };
+  
+  const manageParticipant = async (sCode: string, role: 'editor' | 'viewer') => {
+      if (!user) return;
+      const participantsColRef = collection(db, "sessions", sCode, "participants");
+      const newParticipant = {
+          email: user.email,
+          role,
+          online: true,
+          lastSeen: serverTimestamp()
+      };
+      const docRef = await addDoc(participantsColRef, newParticipant);
+      participantIdRef.current = docRef.id;
+  };
 
   const handleCreateSession = async () => {
-    if (!db) {
-      toast({ title: "Firebase no configurado", description: "Por favor, configura tus credenciales de Firebase.", variant: "destructive" });
+    if (!db || !user) {
+      toast({ title: "Error de autenticación", description: "Por favor, inicia sesión de nuevo.", variant: "destructive" });
       return;
     }
     setIsLoadingSession(true);
     const newCode = generateSessionCode();
     try {
       const sessionDocRef = doc(db, "sessions", newCode);
-      await setDoc(sessionDocRef, { testCases: [], createdAt: Timestamp.fromDate(new Date()) });
+      await setDoc(sessionDocRef, { testCases: [], createdAt: serverTimestamp(), owner: user.uid });
       setSessionCode(newCode);
-      setIsViewerMode(false); // Creator is always an editor
+      setIsViewerMode(false);
+      await manageParticipant(newCode, 'editor');
       toast({ title: "Sesión Creada", description: `El código es: ${newCode}` });
     } catch (error) {
       console.error("Error creating session:", error);
@@ -223,8 +276,8 @@ const TestwareDashboard: React.FC = () => {
   };
 
   const handleJoinSession = async () => {
-    if (!db) {
-      toast({ title: "Firebase no configurado", variant: "destructive" });
+    if (!db || !user) {
+      toast({ title: "Error de autenticación", variant: "destructive" });
       return;
     }
     if (!inputCode.trim()) {
@@ -232,13 +285,16 @@ const TestwareDashboard: React.FC = () => {
       return;
     }
     setIsLoadingSession(true);
+    const code = inputCode.trim().toUpperCase();
     try {
-      const sessionDocRef = doc(db, "sessions", inputCode.trim().toUpperCase());
+      const sessionDocRef = doc(db, "sessions", code);
       const docSnap = await getDoc(sessionDocRef);
       if (docSnap.exists()) {
-        setSessionCode(inputCode.trim().toUpperCase());
+        setSessionCode(code);
+        const role = joinAsViewer ? 'viewer' : 'editor';
         setIsViewerMode(joinAsViewer);
         setViewerFilter('all');
+        await manageParticipant(code, role);
       } else {
         toast({ title: "Sesión no encontrada", description: "El código ingresado no es válido.", variant: "destructive" });
       }
@@ -249,6 +305,7 @@ const TestwareDashboard: React.FC = () => {
       setIsLoadingSession(false);
     }
   };
+
 
   const updateFirestoreTestCases = useCallback(async (updatedCases: TestCase[]) => {
     if (sessionCode) {
@@ -331,10 +388,11 @@ const TestwareDashboard: React.FC = () => {
 
         let headerIndex = -1;
         for (let i = 0; i < sheetData.length; i++) {
-          if (sheetData[i].map(h => String(h).trim()).includes('Proceso')) {
-            headerIndex = i;
-            break;
-          }
+            const normalizedRow = sheetData[i].map(h => String(h).trim());
+            if (normalizedRow.includes('Proceso')) {
+                headerIndex = i;
+                break;
+            }
         }
 
         if (headerIndex === -1) {
@@ -360,7 +418,8 @@ const TestwareDashboard: React.FC = () => {
         const newCases = jsonData.map((row: any) => {
             const newRow: Partial<TestCase> = {};
             for (const key in row) {
-                const mappedKey = columnMapping[key.trim()];
+                const trimmedKey = key.trim();
+                const mappedKey = columnMapping[trimmedKey];
                 if (mappedKey) {
                     newRow[mappedKey] = row[key];
                 }
@@ -569,6 +628,8 @@ const TestwareDashboard: React.FC = () => {
                 <span className="font-mono font-bold text-primary">{sessionCode}</span>
                 <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCopyCode}><Copy className="h-4 w-4"/></Button>
               </div>
+               <ParticipantsBar participants={participants} />
+
               <input type="file" ref={fileInputRef} onChange={handleJsonUpload} accept=".json" className="hidden" id="json-upload" />
               <input type="file" ref={excelInputRef} onChange={handleExcelUpload} accept=".xlsx, .xls" className="hidden" id="excel-upload" />
               
@@ -660,6 +721,50 @@ const TestwareDashboard: React.FC = () => {
     </div>
   );
 };
+
+const ParticipantsBar = ({ participants }: { participants: Participant[] }) => {
+  if (!participants.length) return null;
+
+  const getInitials = (email?: string) => {
+    if (!email) return "?";
+    const parts = email.split("@")[0].split(".");
+    if (parts.length > 1) {
+      return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+    return email.substring(0, 2).toUpperCase();
+  };
+
+  return (
+    <TooltipProvider>
+      <div className="flex items-center -space-x-2">
+        {participants.map((p) => (
+          <Tooltip key={p.id}>
+            <TooltipTrigger asChild>
+              <Avatar className="h-8 w-8 border-2 border-background">
+                <AvatarFallback className={cn(
+                  "text-xs font-bold",
+                   p.role === 'editor' ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                )}>
+                  {getInitials(p.email)}
+                </AvatarFallback>
+              </Avatar>
+            </TooltipTrigger>
+            <TooltipContent>
+              <div className="flex items-center gap-2">
+                 {p.role === 'editor' ? <Pencil className="h-4 w-4 text-primary" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
+                 <div>
+                    <p className="font-bold">{p.email}</p>
+                    <p className="text-xs text-muted-foreground">{p.role === 'editor' ? 'Editor' : 'Espectador'}</p>
+                 </div>
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
+    </TooltipProvider>
+  );
+};
+
 
 const ClearAllConfirmationDialog = ({ onConfirm, disabled }) => (
   <AlertDialog>
@@ -947,9 +1052,11 @@ const ViewerDashboardContent = ({ stats, cases, currentFilter, setFilter }) => {
 
 const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false }: { testCase: TestCase, onUpdate?: Function, onDelete?: Function, isViewerMode?: boolean }) => {
   const { toast } = useToast();
+  const evidenceInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
-  const handleEvidenceChange = (e: ChangeEvent<HTMLInputElement>) => {
-    if (isViewerMode) return;
+  const handleEvidenceSelect = (e: ChangeEvent<HTMLInputElement>) => {
+    if (isViewerMode || !storage) return;
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -963,16 +1070,19 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-        const result = reader.result as string;
-        onUpdate?.(testCase.id, 'evidencia', result);
-        toast({ title: "Evidencia Actualizada", description: "La vista previa de la imagen ha sido actualizada." });
-    };
-    reader.onerror = () => {
-      toast({ title: "Error de lectura", description: "No se pudo leer el archivo de imagen.", variant: "destructive" });
-    };
-    reader.readAsDataURL(file);
+    setIsUploading(true);
+    const storageRef = ref(storage, `evidence/${testCase.id}/${file.name}`);
+    uploadBytes(storageRef, file).then((snapshot) => {
+        getDownloadURL(snapshot.ref).then((downloadURL) => {
+            onUpdate?.(testCase.id, 'evidencia', downloadURL);
+            toast({ title: "Evidencia Actualizada", description: "La imagen se ha subido correctamente." });
+        });
+    }).catch(error => {
+        console.error("Error uploading image:", error);
+        toast({ title: "Error de subida", description: "No se pudo subir la imagen.", variant: "destructive" });
+    }).finally(() => {
+        setIsUploading(false);
+    });
   };
   
   const formatTimestamp = (timestamp: any) => {
@@ -986,6 +1096,7 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
   };
 
   const isDataUrl = testCase.evidencia && testCase.evidencia.startsWith('data:image');
+  const isFirebaseUrl = testCase.evidencia && testCase.evidencia.includes('firebasestorage.googleapis.com');
 
   return (
     <Card className="overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300">
@@ -1068,15 +1179,24 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
 
           <div className="space-y-2">
             <Label className="font-semibold">Evidencia</Label>
-             <Input
-                key={`evidence-${testCase.id}`}
+            <div className="flex gap-2">
+              <Input
+                key={`evidence-url-${testCase.id}`}
                 defaultValue={testCase.evidencia}
                 onBlur={e => onUpdate?.(testCase.id, 'evidencia', e.target.value)}
-                placeholder={testCase.estado === 'Fallido' ? 'URL de evidencia requerida' : 'Pega la URL de la evidencia'}
-                className="bg-background/50"
+                placeholder={'Pega la URL o sube una imagen'}
+                className="bg-background/50 flex-grow"
                 readOnly={isViewerMode}
               />
-            {isDataUrl ? (
+              <input type="file" ref={evidenceInputRef} onChange={handleEvidenceSelect} accept="image/*" className="hidden" />
+              {!isViewerMode && (
+                  <Button variant="outline" size="icon" onClick={() => evidenceInputRef.current?.click()} disabled={isUploading}>
+                      {isUploading ? <Loader2 className="animate-spin" /> : <Upload className="h-4 w-4" />}
+                  </Button>
+              )}
+            </div>
+
+            {isDataUrl || isFirebaseUrl ? (
               <a href={testCase.evidencia} target="_blank" rel="noopener noreferrer" className="mt-2 block">
                 <img src={testCase.evidencia} alt="Vista previa de la evidencia" data-ai-hint="evidence screenshot" className="w-full rounded-md object-cover max-h-48 hover:opacity-80 transition-opacity border" />
               </a>
@@ -1119,10 +1239,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
     }
     setIsLoading(true);
     setImpactAnalysis(null);
-    const aiCases = failedCases.map(({ id, updatedAt, updatedBy, ...rest }) => ({ 
-      ...rest, 
-      estado: 'Fallido' as const 
-    }));
+    const aiCases = failedCases.map(({ id, ...rest }) => ({ ...rest, estado: 'Fallido' as const }));
     
     try {
       const result = await generateReportAction({ failedTestCases: aiCases, reportDescription });
@@ -1230,7 +1347,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                 fieldsToEstimate.forEach(field => {
                   estimatedHeight += (pdf.splitTextToSize(field || '-', contentWidth).length * (pdf.getLineHeight() / pdf.internal.scaleFactor) + 4);
                 })
-                if (tc.evidencia && tc.evidencia.startsWith('data:image')) {
+                if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.includes('firebasestorage'))) {
                     estimatedHeight += 50;
                 } else if (tc.evidencia) {
                     estimatedHeight += 15;
@@ -1260,7 +1377,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                 renderField('Comentarios de QA:', tc.comentarios, false, [192, 57, 43]);
                 
                 addTextBox('Evidencia:', { fontSize: 10, fontStyle: 'bold' });
-                if (tc.evidencia && tc.evidencia.startsWith('data:image')) {
+                if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.includes('firebasestorage'))) {
                     try {
                         const { width, height } = await getImageDimensions(tc.evidencia);
                         const imgWidth = contentWidth / 2;
@@ -1437,7 +1554,7 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
     }
     setIsLoading(true);
     setAnalysis(null);
-    const aiCases = commentedCases.map(({ id, updatedAt, updatedBy, ...rest }) => rest);
+    const aiCases = commentedCases.map(({ id, ...rest }) => rest);
     
     try {
       const result = await generateImprovementReportAction({ commentedTestCases: aiCases, reportDescription });
@@ -1534,7 +1651,7 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
                 fieldsToEstimate.forEach(field => {
                   estimatedHeight += (pdf.splitTextToSize(field || '-', contentWidth).length * (pdf.getLineHeight() / pdf.internal.scaleFactor) + 4);
                 })
-                if (tc.evidencia && tc.evidencia.startsWith('data:image')) {
+                 if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.includes('firebasestorage'))) {
                     estimatedHeight += 50;
                 } else if (tc.evidencia) {
                     estimatedHeight += 15;
@@ -1567,7 +1684,7 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
                 }
                 
                 addTextBox('Evidencia:', { fontSize: 10, fontStyle: 'bold' });
-                if (tc.evidencia && tc.evidencia.startsWith('data:image')) {
+                 if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.includes('firebasestorage'))) {
                     try {
                         const { width, height } = await getImageDimensions(tc.evidencia);
                         const imgWidth = contentWidth / 2;

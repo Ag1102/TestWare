@@ -15,6 +15,15 @@ export interface TestCase {
   updatedAt?: any;
 }
 
+export interface Participant {
+  id: string;
+  email?: string;
+  role: 'editor' | 'viewer';
+  online: boolean;
+  lastSeen?: any;
+}
+
+
 // This type aligns with the stricter schema expected by the Genkit AI flow.
 export interface AITestCase {
   proceso: string;

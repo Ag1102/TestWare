@@ -54,7 +54,6 @@ import { doc, setDoc, getDoc, onSnapshot, updateDoc, Timestamp } from "firebase/
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import * as XLSX from 'xlsx';
 
-
 const getImageDimensions = (uri: string): Promise<{ width: number; height: number }> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -321,7 +320,7 @@ const TestwareDashboard: React.FC = () => {
   const handleExcelUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
+  
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
@@ -330,8 +329,26 @@ const TestwareDashboard: React.FC = () => {
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
         
-        const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 0 });
-
+        // Convert sheet to array of arrays to find header row dynamically
+        const sheetData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+  
+        // Find header row index by looking for 'Proceso'
+        let headerIndex = -1;
+        for (let i = 0; i < sheetData.length; i++) {
+          if (sheetData[i].map(h => String(h).trim()).includes('Proceso')) {
+            headerIndex = i;
+            break;
+          }
+        }
+  
+        if (headerIndex === -1) {
+          toast({ title: "Formato de Excel Inválido", description: "No se encontró la fila de encabezado. Asegúrate de que una columna se llame 'Proceso'.", variant: "destructive" });
+          return;
+        }
+  
+        // Convert sheet to JSON starting from the detected header row
+        const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { header: headerIndex, defval: "" });
+  
         const columnMapping: { [key: string]: keyof TestCase } = {
           "Proceso": "proceso",
           "Caso de Prueba": "casoPrueba",
@@ -354,7 +371,7 @@ const TestwareDashboard: React.FC = () => {
             }
             return newRow;
         })
-        .filter(obj => Object.keys(obj).length > 0)
+        .filter(obj => Object.values(obj).some(val => val !== '')) // Filter out completely empty rows
         .map(c => ({
           ...c,
           id: simpleUUID(),
@@ -368,11 +385,11 @@ const TestwareDashboard: React.FC = () => {
           evidencia: c.evidencia || '',
           comentarios: c.comentarios || '',
         } as TestCase));
-
+  
         const updatedCases = [...testCases, ...newCases];
         updateFirestoreTestCases(updatedCases);
         toast({ title: "Éxito", description: `${newCases.length} casos de prueba importados de Excel.` });
-
+  
       } catch (error) {
         console.error("Failed to parse or upload Excel", error);
         toast({ title: "Fallo la Carga", description: "Por favor, carga un archivo Excel válido y con el formato correcto.", variant: "destructive" });
@@ -561,16 +578,7 @@ const TestwareDashboard: React.FC = () => {
               
               {!isViewerMode && (
                 <div className="hidden sm:flex items-center space-x-2">
-                   <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button variant="outline" onClick={() => excelInputRef.current?.click()}><FileSpreadsheet /> Importar Excel</Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Columnas esperadas: Proceso, Caso de Prueba, Descripción del Caso de Prueba, Datos de Prueba Sugeridos, Paso a paso, Resultado Esperado, Estado, Evidencia, Comentarios.</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                  <Button variant="outline" onClick={() => excelInputRef.current?.click()}><FileSpreadsheet /> Importar Excel</Button>
                   <Button variant="outline" onClick={() => fileInputRef.current?.click()}><Upload /> Cargar JSON</Button>
                   <ImprovementReportDialog commentedCases={commentedCases} allCases={testCases} stats={stats}/>
                   <FailureReportDialog failedCases={failedCases} allCases={testCases} />
@@ -633,18 +641,9 @@ const TestwareDashboard: React.FC = () => {
                 <h2 className="text-2xl font-semibold mt-4">Sesión Lista para Colaborar</h2>
                 <p className="text-muted-foreground mt-2">Carga un archivo JSON, importa un Excel o comparte el código para empezar.</p>
                  <div className="mt-6 flex justify-center gap-4">
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                           <Button onClick={() => excelInputRef.current?.click()} className="bg-primary hover:bg-primary/90">
-                            <FileSpreadsheet className="mr-2" /> Importar desde Excel
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Columnas esperadas: Proceso, Caso de Prueba, Descripción del Caso de Prueba, Datos de Prueba Sugeridos, Paso a paso, Resultado Esperado, Estado, Evidencia, Comentarios.</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
+                    <Button onClick={() => excelInputRef.current?.click()} className="bg-primary hover:bg-primary/90">
+                      <FileSpreadsheet className="mr-2" /> Importar desde Excel
+                    </Button>
                     <Button onClick={() => fileInputRef.current?.click()} variant="secondary">
                       <Upload className="mr-2" /> Cargar archivo JSON
                     </Button>
@@ -1002,7 +1001,7 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-2">
               <UserIcon className="h-3 w-3" />
               <p>
-                Actualizado por <strong>{testCase.updatedBy}</strong>
+                Actualizado por <strong>{testCase.updatedBy}</strong> el {formatTimestamp(testCase.updatedAt)}
               </p>
             </div>
           )}

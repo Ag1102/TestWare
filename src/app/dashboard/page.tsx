@@ -309,10 +309,12 @@ const TestwareDashboard: React.FC = () => {
     if (sessionCode) {
       try {
         const sessionDocRef = doc(db, "sessions", sessionCode);
-        await updateDoc(sessionDocRef, { testCases: updatedCases });
+        // Clean up non-serializable data before sending to Firestore
+        const casesToSave = updatedCases.map(({ evidenciaFile, ...rest }) => rest);
+        await updateDoc(sessionDocRef, { testCases: casesToSave });
       } catch (error) {
         console.error("Failed to sync with Firestore:", error);
-        toast({ title: "Error de Sincronización", description: "No se pudieron guardar los cambios.", variant: "destructive" });
+        toast({ title: "Error de Sincronización", description: "No se pudieron guardar los cambios. La imagen puede ser demasiado grande.", variant: "destructive" });
       }
     }
   }, [sessionCode, toast]);
@@ -453,19 +455,36 @@ const TestwareDashboard: React.FC = () => {
   };
 
 
-  const handleUpdate = useCallback((id: string, field: keyof TestCase, value: string | TestCaseStatus) => {
+  const handleUpdate = useCallback((id: string, field: keyof TestCase, value: string | TestCaseStatus | File) => {
     const updatedCases = testCases.map(tc => {
         if (tc.id === id) {
-            const newTc = { ...tc, [field]: value };
+            const newTc: TestCase = { ...tc, [field]: value };
             if (field === 'estado') {
                 newTc.updatedBy = user?.email || 'System';
                 newTc.updatedAt = Timestamp.fromDate(new Date());
+            }
+            if (field === 'evidenciaFile' && value instanceof File) {
+              const reader = new FileReader();
+              reader.onload = (e) => {
+                const dataUrl = e.target?.result as string;
+                const finalCases = testCases.map(t => t.id === id ? {...newTc, evidencia: dataUrl, evidenciaFile: undefined} : t);
+                updateFirestoreTestCases(finalCases);
+              };
+              reader.readAsDataURL(value);
+              // Return immediately as the update will be async
+              return {...newTc, evidenciaFile: value };
             }
             return newTc;
         }
         return tc;
     });
-    updateFirestoreTestCases(updatedCases);
+
+    if (!(value instanceof File)) {
+      updateFirestoreTestCases(updatedCases);
+    } else {
+      setTestCases(updatedCases); // Show loading state or file name while processing
+    }
+
   }, [testCases, updateFirestoreTestCases, user]);
   
   const handleDeleteTestCase = useCallback((id: string) => {
@@ -1060,6 +1079,14 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
   };
 
   const isImageUrl = testCase.evidencia && (testCase.evidencia.startsWith('data:image') || testCase.evidencia.startsWith('http'));
+  const evidenceInputRef = useRef<HTMLInputElement>(null);
+
+  const handleEvidenceSelect = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && onUpdate) {
+      onUpdate(testCase.id, 'evidenciaFile', file);
+    }
+  };
 
   return (
     <Card className="overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300">
@@ -1142,14 +1169,30 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
 
           <div className="space-y-2">
             <Label className="font-semibold">Evidencia</Label>
-             <Input
-                key={`evidence-url-${testCase.id}`}
-                defaultValue={testCase.evidencia}
-                onBlur={e => onUpdate?.(testCase.id, 'evidencia', e.target.value)}
-                placeholder={'Pega la URL de la imagen o Data URI'}
-                className="bg-background/50 flex-grow"
-                readOnly={isViewerMode}
-              />
+            <div className="flex items-center gap-2">
+              <Input
+                  key={`evidence-url-${testCase.id}`}
+                  defaultValue={testCase.evidenciaFile ? testCase.evidenciaFile.name : testCase.evidencia}
+                  onBlur={e => onUpdate?.(testCase.id, 'evidencia', e.target.value)}
+                  placeholder={testCase.evidenciaFile ? testCase.evidenciaFile.name : 'Pega la URL o carga una imagen'}
+                  className="bg-background/50 flex-grow"
+                  readOnly={isViewerMode || !!testCase.evidenciaFile}
+                />
+              {!isViewerMode && (
+                <>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    ref={evidenceInputRef}
+                    onChange={handleEvidenceSelect}
+                    className="hidden"
+                  />
+                  <Button variant="outline" size="icon" onClick={() => evidenceInputRef.current?.click()}>
+                    <Upload className="h-4 w-4" />
+                  </Button>
+                </>
+              )}
+            </div>
             
             {isImageUrl ? (
               <a href={testCase.evidencia} target="_blank" rel="noopener noreferrer" className="mt-2 block">
@@ -1369,7 +1412,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         
         if (pieChartEl && barChartEl) {
           const addChart = async (element: HTMLElement) => {
-              const canvas = await html2canvas(element, { scale: 3, backgroundColor: '#ffffff' });
+              const canvas = await html2canvas(element, { scale: 3, backgroundColor: '#ffffff', useCORS: true });
               return canvas.toDataURL('image/png', 1.0);
           };
           
@@ -1675,7 +1718,7 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
         
         if (pieChartEl && barChartEl) {
           const addChart = async (element: HTMLElement) => {
-              const canvas = await html2canvas(element, { scale: 3, backgroundColor: '#ffffff' });
+              const canvas = await html2canvas(element, { scale: 3, backgroundColor: '#ffffff', useCORS: true });
               return canvas.toDataURL('image/png', 1.0);
           };
           

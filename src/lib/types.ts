@@ -1,4 +1,4 @@
-export type TestCaseStatus = 'Passed' | 'Failed' | 'N/A' | 'pending';
+export type TestCaseStatus = 'Aprobado' | 'Fallido' | 'N/A' | 'Pendiente';
 
 export interface TestCase {
   id: string;
@@ -11,7 +11,18 @@ export interface TestCase {
   evidencia: string;
   comentarios: string;
   estado: TestCaseStatus;
+  updatedBy?: string;
+  updatedAt?: any;
 }
+
+export interface Participant {
+  id: string;
+  email?: string;
+  role: 'editor' | 'viewer';
+  online: boolean;
+  lastSeen?: any;
+}
+
 
 // This type aligns with the stricter schema expected by the Genkit AI flow.
 export interface AITestCase {

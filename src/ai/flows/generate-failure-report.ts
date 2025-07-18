@@ -71,7 +71,15 @@ const generateFailureReportFlow = ai.defineFlow(
     outputSchema: FailureReportOutputSchema,
   },
   async input => {
-    const {output} = await failureReportPrompt(input);
+    // Remove properties that are not part of the schema before calling the prompt
+    const cleanedFailedTestCases = input.failedTestCases.map(tc => {
+        const { updatedAt, updatedBy, ...rest } = tc as any;
+        return rest;
+    });
+
+    const cleanedInput = { ...input, failedTestCases: cleanedFailedTestCases };
+
+    const {output} = await failureReportPrompt(cleanedInput);
     return output!;
   }
 );

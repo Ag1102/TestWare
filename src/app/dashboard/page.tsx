@@ -59,7 +59,7 @@ import * as XLSX from 'xlsx';
 const getImageDimensions = (uri: string): Promise<{ width: number; height: number }> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.crossOrigin = "Anonymous";
+    img.crossOrigin = "Anonymous"; // Crucial for loading images from another origin (Firebase Storage)
     img.onload = () => {
       resolve({ width: img.width, height: img.height });
     };
@@ -717,7 +717,6 @@ const TestwareDashboard: React.FC = () => {
                   onDelete={handleDeleteTestCase} 
                   sessionCode={sessionCode} 
                   updateFirestoreTestCases={updateFirestoreTestCases} 
-                  allTestCases={testCases}
                 />
               ))}
               {filteredCases.length === 0 && (
@@ -1059,14 +1058,13 @@ const ViewerDashboardContent = ({ stats, cases, currentFilter, setFilter }) => {
     );
 };
 
-const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false, sessionCode, allTestCases, updateFirestoreTestCases }: { 
+const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false, sessionCode, updateFirestoreTestCases }: { 
     testCase: TestCase, 
     onUpdate?: (id: string, field: keyof TestCase, value: string | TestCaseStatus) => void, 
     onDelete?: (id: string) => void, 
     isViewerMode?: boolean,
     sessionCode?: string | null,
     updateFirestoreTestCases: (cases: TestCase[]) => Promise<void>,
-    allTestCases: TestCase[]
 }) => {
   const [isUploading, setIsUploading] = useState(false);
   const evidenceInputRef = useRef<HTMLInputElement>(null);
@@ -1082,7 +1080,7 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false,
     }
   };
   
-  const handleEvidenceSelect = async (e: ChangeEvent<HTMLInputElement>) => {
+  const handleEvidenceSelect = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !sessionCode || !storage) {
         return;
@@ -1092,25 +1090,36 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false,
     try {
         const fileExtension = file.name.split('.').pop();
         const randomId = Math.random().toString(36).substring(2, 10);
-        const uniqueFileName = `${randomId}.${fileExtension}`;
+        const uniqueFileName = `${testCase.id}-${randomId}.${fileExtension}`;
         const imageRef = storageRef(storage, `sessions/${sessionCode}/${uniqueFileName}`);
         
         await uploadBytes(imageRef, file);
         const downloadUrl = await getDownloadURL(imageRef);
         
-        const updatedCases = allTestCases.map(tc => 
-            tc.id === testCase.id ? { ...tc, evidencia: downloadUrl } : tc
-        );
-        await updateFirestoreTestCases(updatedCases);
+        // This is a more direct way to update, avoiding state race conditions.
+        const sessionDocRef = doc(db, "sessions", sessionCode);
+        const sessionSnap = await getDoc(sessionDocRef);
+        if (sessionSnap.exists()) {
+            const currentCases = sessionSnap.data().testCases || [];
+            const updatedCases = currentCases.map(tc => 
+                tc.id === testCase.id ? { ...tc, evidencia: downloadUrl } : tc
+            );
+            await updateDoc(sessionDocRef, { testCases: updatedCases });
+            toast({ title: 'Éxito', description: 'Evidencia subida correctamente.' });
+        } else {
+            throw new Error("Session not found during update");
+        }
 
-        toast({ title: 'Éxito', description: 'Evidencia subida correctamente.' });
     } catch (error) {
         console.error('Error uploading evidence:', error);
         toast({ title: 'Error de Subida', description: 'No se pudo subir la evidencia.', variant: 'destructive' });
     } finally {
         setIsUploading(false);
+        if (evidenceInputRef.current) {
+          evidenceInputRef.current.value = "";
+        }
     }
-  };
+  }, [sessionCode, testCase.id, toast]);
   
   const isImageUrl = testCase.evidencia && (testCase.evidencia.startsWith('data:image') || testCase.evidencia.startsWith('http'));
 
@@ -1200,7 +1209,7 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false,
                   key={`evidence-url-${testCase.id}`}
                   defaultValue={testCase.evidencia}
                   onBlur={e => onUpdate?.(testCase.id, 'evidencia', e.target.value)}
-                  placeholder={'Pega la URL, sube una imagen o déjalo vacío'}
+                  placeholder={'Pega la URL o sube una imagen'}
                   className="bg-background/50 flex-grow"
                   readOnly={isViewerMode || isUploading}
                 />

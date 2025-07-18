@@ -42,7 +42,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useToast } from "@/hooks/use-toast";
 import { generateReportAction, generateImprovementReportAction } from '@/app/actions';
-import { Upload, Download, Trash2, Bug, Lightbulb, Loader2, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter, PieChart as PieChartIcon, LogIn, PlusCircle, Copy, LogOut, Share2, User as UserIcon, Power, PanelLeft, MoreVertical } from 'lucide-react';
+import { Upload, Download, Trash2, Bug, Lightbulb, Loader2, CheckCircle2, XCircle, FileQuestion, Hourglass, BarChart2, Filter, PieChart as PieChartIcon, LogIn, PlusCircle, Copy, LogOut, Share2, User as UserIcon, Power, PanelLeft, MoreVertical, FileSpreadsheet } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
@@ -51,11 +51,13 @@ import { cn } from "@/lib/utils";
 import { db, auth } from "@/lib/firebase";
 import { doc, setDoc, getDoc, onSnapshot, updateDoc, Timestamp } from "firebase/firestore";
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
+import * as XLSX from 'xlsx';
 
 
 const getImageDimensions = (uri: string): Promise<{ width: number; height: number }> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
+    img.crossOrigin = "Anonymous"; // Crucial for loading cross-origin images
     img.onload = () => {
       resolve({ width: img.width, height: img.height });
     };
@@ -136,6 +138,7 @@ const TestwareDashboard: React.FC = () => {
   const [filterProcess, setFilterProcess] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const excelInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   
@@ -288,7 +291,7 @@ const TestwareDashboard: React.FC = () => {
     return { total, passed, failed, na, pending, completed, progress };
   }, [testCases]);
 
-  const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleJsonUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -313,6 +316,69 @@ const TestwareDashboard: React.FC = () => {
     reader.readAsText(file);
     if(fileInputRef.current) fileInputRef.current.value = "";
   };
+
+  const handleExcelUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = event.target?.result;
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        
+        // Use header: 1 to specify the second row as the header
+        const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+        // The actual headers are in the first row of the parsed data (index 0)
+        const headers = jsonData[0] as string[];
+        const rows = jsonData.slice(1);
+
+        const columnMapping: { [key: string]: keyof TestCase } = {
+          "Proceso": "proceso",
+          "Caso de Prueba": "casoPrueba",
+          "Descripción del Caso de Prueba": "descripcion",
+          "Datos de Prueba Sugeridos": "datosPrueba",
+          "Paso a paso": "pasoAPaso",
+          "Resultado Esperado": "resultadoEsperado",
+          "Estado": "estado",
+          "Evidencia": "evidencia",
+          "Comentarios": "comentarios"
+        };
+        
+        const newCases = rows.map((rowArray: any[]) => {
+          const rowObject: any = {};
+          headers.forEach((header: string, index: number) => {
+              const cleanHeader = header.trim();
+              const mappedKey = columnMapping[cleanHeader];
+              if (mappedKey) {
+                  rowObject[mappedKey] = rowArray[index] !== undefined ? rowArray[index] : "";
+              }
+          });
+          return rowObject;
+        })
+        .filter(obj => Object.keys(obj).length > 0) // Filter out empty rows
+        .map(c => ({
+          ...c,
+          id: simpleUUID(),
+          estado: c.estado || 'Pendiente'
+        }));
+
+        const updatedCases = [...testCases, ...newCases];
+        updateFirestoreTestCases(updatedCases);
+        toast({ title: "Éxito", description: `${newCases.length} casos de prueba importados de Excel.` });
+
+      } catch (error) {
+        console.error("Failed to parse or upload Excel", error);
+        toast({ title: "Fallo la Carga", description: "Por favor, carga un archivo Excel válido.", variant: "destructive" });
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    if(excelInputRef.current) excelInputRef.current.value = "";
+  };
+
 
   const handleUpdate = useCallback((id: string, field: keyof TestCase, value: string | TestCaseStatus) => {
     const updatedCases = testCases.map(tc => {
@@ -487,10 +553,12 @@ const TestwareDashboard: React.FC = () => {
                 <span className="font-mono font-bold text-primary">{sessionCode}</span>
                 <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCopyCode}><Copy className="h-4 w-4"/></Button>
               </div>
-              <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".json" className="hidden" id="json-upload" />
+              <input type="file" ref={fileInputRef} onChange={handleJsonUpload} accept=".json" className="hidden" id="json-upload" />
+              <input type="file" ref={excelInputRef} onChange={handleExcelUpload} accept=".xlsx, .xls" className="hidden" id="excel-upload" />
               
               {!isViewerMode && (
                 <div className="hidden sm:flex items-center space-x-2">
+                  <Button variant="outline" onClick={() => excelInputRef.current?.click()}><FileSpreadsheet /> Importar Excel</Button>
                   <Button variant="outline" onClick={() => fileInputRef.current?.click()}><Upload /> Cargar JSON</Button>
                   <ImprovementReportDialog commentedCases={commentedCases} allCases={testCases} stats={stats}/>
                   <FailureReportDialog failedCases={failedCases} allCases={testCases} />
@@ -507,6 +575,7 @@ const TestwareDashboard: React.FC = () => {
                 <DropdownMenuContent align="end">
                   {!isViewerMode && (
                     <>
+                      <DropdownMenuItem className="sm:hidden" onClick={() => excelInputRef.current?.click()}><FileSpreadsheet className="mr-2"/> Importar Excel</DropdownMenuItem>
                       <DropdownMenuItem className="sm:hidden" onClick={() => fileInputRef.current?.click()}><Upload className="mr-2"/> Cargar JSON</DropdownMenuItem>
                       <DropdownMenuSub className="sm:hidden">
                         <DropdownMenuSubTrigger><Bug className="mr-2"/> Informes</DropdownMenuSubTrigger>
@@ -550,10 +619,15 @@ const TestwareDashboard: React.FC = () => {
               <div className="text-center py-20">
                 <Share2 className="mx-auto h-12 w-12 text-muted-foreground" />
                 <h2 className="text-2xl font-semibold mt-4">Sesión Lista para Colaborar</h2>
-                <p className="text-muted-foreground mt-2">Carga un archivo JSON o comparte el código de la sesión para empezar.</p>
-                <Button onClick={() => fileInputRef.current?.click()} className="mt-6 bg-primary hover:bg-primary/90">
-                  <Upload className="mr-2" /> Carga tu primer archivo
-                </Button>
+                <p className="text-muted-foreground mt-2">Carga un archivo JSON, importa un Excel o comparte el código para empezar.</p>
+                 <div className="mt-6 flex justify-center gap-4">
+                    <Button onClick={() => excelInputRef.current?.click()} className="bg-primary hover:bg-primary/90">
+                      <FileSpreadsheet className="mr-2" /> Importar desde Excel
+                    </Button>
+                    <Button onClick={() => fileInputRef.current?.click()} variant="secondary">
+                      <Upload className="mr-2" /> Cargar archivo JSON
+                    </Button>
+                 </div>
               </div>
             ) : (
             <div className="space-y-6">

@@ -29,7 +29,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -57,7 +56,6 @@ import * as XLSX from 'xlsx';
 const getImageDimensions = (uri: string): Promise<{ width: number; height: number }> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.crossOrigin = "Anonymous";
     img.onload = () => {
       resolve({ width: img.width, height: img.height });
     };
@@ -320,7 +318,7 @@ const TestwareDashboard: React.FC = () => {
   const handleExcelUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-  
+
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
@@ -328,11 +326,9 @@ const TestwareDashboard: React.FC = () => {
         const workbook = XLSX.read(data, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        
-        // Convert sheet to array of arrays to find header row dynamically
+
         const sheetData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
-  
-        // Find header row index by looking for 'Proceso'
+
         let headerIndex = -1;
         for (let i = 0; i < sheetData.length; i++) {
           if (sheetData[i].map(h => String(h).trim()).includes('Proceso')) {
@@ -340,15 +336,15 @@ const TestwareDashboard: React.FC = () => {
             break;
           }
         }
-  
+
         if (headerIndex === -1) {
           toast({ title: "Formato de Excel Inválido", description: "No se encontró la fila de encabezado. Asegúrate de que una columna se llame 'Proceso'.", variant: "destructive" });
           return;
         }
-  
-        // Convert sheet to JSON starting from the detected header row
-        const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { header: headerIndex, defval: "" });
-  
+        
+        const header = sheetData[headerIndex].map(h => String(h).trim());
+        const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { header, defval: "", range: headerIndex + 1 });
+        
         const columnMapping: { [key: string]: keyof TestCase } = {
           "Proceso": "proceso",
           "Caso de Prueba": "casoPrueba",
@@ -1071,18 +1067,15 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor={`evidence-input-${testCase.id}`} className="font-semibold">Evidencia</Label>
-            <div className="flex items-center gap-2">
-              <Input
-                id={`evidence-input-${testCase.id}`}
+            <Label className="font-semibold">Evidencia</Label>
+             <Input
                 key={`evidence-${testCase.id}`}
                 defaultValue={testCase.evidencia}
                 onBlur={e => onUpdate?.(testCase.id, 'evidencia', e.target.value)}
-                placeholder={testCase.estado === 'Fallido' ? 'URL de evidencia requerida' : 'Pega la URL o carga una imagen'}
+                placeholder={testCase.estado === 'Fallido' ? 'URL de evidencia requerida' : 'Pega la URL de la evidencia'}
                 className="bg-background/50"
                 readOnly={isViewerMode}
               />
-            </div>
             {isDataUrl ? (
               <a href={testCase.evidencia} target="_blank" rel="noopener noreferrer" className="mt-2 block">
                 <img src={testCase.evidencia} alt="Vista previa de la evidencia" data-ai-hint="evidence screenshot" className="w-full rounded-md object-cover max-h-48 hover:opacity-80 transition-opacity border" />
@@ -1126,7 +1119,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
     }
     setIsLoading(true);
     setImpactAnalysis(null);
-    const aiCases = failedCases.map(({ id, updatedBy, updatedAt, ...rest }) => ({ 
+    const aiCases = failedCases.map(({ id, updatedAt, updatedBy, ...rest }) => ({ 
       ...rest, 
       estado: 'Fallido' as const 
     }));

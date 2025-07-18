@@ -50,16 +50,14 @@ import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from "@/lib/utils";
-import { db, auth, storage } from "@/lib/firebase";
+import { db, auth } from "@/lib/firebase";
 import { doc, setDoc, getDoc, onSnapshot, updateDoc, Timestamp, collection, addDoc, deleteDoc, query, where, getDocs, writeBatch, serverTimestamp } from "firebase/firestore";
-import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import * as XLSX from 'xlsx';
 
 const getImageDimensions = (uri: string): Promise<{ width: number; height: number }> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.crossOrigin = "Anonymous"; // Crucial for loading images from another origin (Firebase Storage)
     img.onload = () => {
       resolve({ width: img.width, height: img.height });
     };
@@ -455,19 +453,18 @@ const TestwareDashboard: React.FC = () => {
   };
 
 
-  const handleUpdate = useCallback((id: string, field: keyof TestCase, value: string | TestCaseStatus) => {
+  const handleUpdate = useCallback((id: string, field: keyof TestCase, value: any) => {
     const updatedCases = testCases.map(tc => {
-        if (tc.id === id) {
-            const newTc: TestCase = { ...tc, [field]: value };
-            if (field === 'estado') {
-                newTc.updatedBy = user?.email || 'System';
-                newTc.updatedAt = Timestamp.fromDate(new Date());
-            }
-            return newTc;
+      if (tc.id === id) {
+        const newTc: TestCase = { ...tc, [field]: value };
+        if (field === 'estado') {
+          newTc.updatedBy = user?.email || 'System';
+          newTc.updatedAt = Timestamp.fromDate(new Date());
         }
-        return tc;
+        return newTc;
+      }
+      return tc;
     });
-
     updateFirestoreTestCases(updatedCases);
   }, [testCases, updateFirestoreTestCases, user]);
   
@@ -715,8 +712,6 @@ const TestwareDashboard: React.FC = () => {
                   testCase={tc} 
                   onUpdate={handleUpdate} 
                   onDelete={handleDeleteTestCase} 
-                  sessionCode={sessionCode} 
-                  updateFirestoreTestCases={updateFirestoreTestCases} 
                 />
               ))}
               {filteredCases.length === 0 && (
@@ -1058,13 +1053,51 @@ const ViewerDashboardContent = ({ stats, cases, currentFilter, setFilter }) => {
     );
 };
 
-const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false, sessionCode, updateFirestoreTestCases }: { 
+// Helper function to resize image
+const resizeImage = (file: File, maxWidth: number, maxHeight: number): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target?.result as string;
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let { width, height } = img;
+
+                if (width > height) {
+                    if (width > maxWidth) {
+                        height = Math.round((height * maxWidth) / width);
+                        width = maxWidth;
+                    }
+                } else {
+                    if (height > maxHeight) {
+                        width = Math.round((width * maxHeight) / height);
+                        height = maxHeight;
+                    }
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    return reject(new Error('Could not get canvas context'));
+                }
+                ctx.drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL(file.type));
+            };
+            img.onerror = (error) => reject(error);
+        };
+        reader.onerror = (error) => reject(error);
+    });
+};
+
+
+const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false }: { 
     testCase: TestCase, 
-    onUpdate?: (id: string, field: keyof TestCase, value: string | TestCaseStatus) => void, 
+    onUpdate?: (id: string, field: keyof TestCase, value: any) => void, 
     onDelete?: (id: string) => void, 
     isViewerMode?: boolean,
-    sessionCode?: string | null,
-    updateFirestoreTestCases: (cases: TestCase[]) => Promise<void>,
 }) => {
   const [isUploading, setIsUploading] = useState(false);
   const evidenceInputRef = useRef<HTMLInputElement>(null);
@@ -1082,44 +1115,30 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false,
   
   const handleEvidenceSelect = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !sessionCode || !storage) {
+    if (!file) {
         return;
     }
     
+    if (!file.type.startsWith('image/')) {
+        toast({ title: 'Archivo no válido', description: 'Por favor, selecciona un archivo de imagen.', variant: 'destructive' });
+        return;
+    }
+
     setIsUploading(true);
     try {
-        const fileExtension = file.name.split('.').pop();
-        const randomId = Math.random().toString(36).substring(2, 10);
-        const uniqueFileName = `${testCase.id}-${randomId}.${fileExtension}`;
-        const imageRef = storageRef(storage, `sessions/${sessionCode}/${uniqueFileName}`);
-        
-        await uploadBytes(imageRef, file);
-        const downloadUrl = await getDownloadURL(imageRef);
-        
-        // This is a more direct way to update, avoiding state race conditions.
-        const sessionDocRef = doc(db, "sessions", sessionCode);
-        const sessionSnap = await getDoc(sessionDocRef);
-        if (sessionSnap.exists()) {
-            const currentCases = sessionSnap.data().testCases || [];
-            const updatedCases = currentCases.map(tc => 
-                tc.id === testCase.id ? { ...tc, evidencia: downloadUrl } : tc
-            );
-            await updateDoc(sessionDocRef, { testCases: updatedCases });
-            toast({ title: 'Éxito', description: 'Evidencia subida correctamente.' });
-        } else {
-            throw new Error("Session not found during update");
-        }
-
+        const resizedDataUrl = await resizeImage(file, 1024, 1024);
+        onUpdate?.(testCase.id, 'evidencia', resizedDataUrl);
+        toast({ title: 'Éxito', description: 'Evidencia subida correctamente.' });
     } catch (error) {
-        console.error('Error uploading evidence:', error);
-        toast({ title: 'Error de Subida', description: 'No se pudo subir la evidencia.', variant: 'destructive' });
+        console.error('Error processing image:', error);
+        toast({ title: 'Error de Carga', description: 'No se pudo procesar la imagen.', variant: 'destructive' });
     } finally {
         setIsUploading(false);
         if (evidenceInputRef.current) {
           evidenceInputRef.current.value = "";
         }
     }
-  }, [sessionCode, testCase.id, toast]);
+  }, [testCase.id, onUpdate, toast]);
   
   const isImageUrl = testCase.evidencia && (testCase.evidencia.startsWith('data:image') || testCase.evidencia.startsWith('http'));
 

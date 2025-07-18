@@ -29,6 +29,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -57,7 +58,7 @@ import * as XLSX from 'xlsx';
 const getImageDimensions = (uri: string): Promise<{ width: number; height: number }> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.crossOrigin = "Anonymous"; // Crucial for loading cross-origin images
+    img.crossOrigin = "Anonymous";
     img.onload = () => {
       resolve({ width: img.width, height: img.height });
     };
@@ -329,12 +330,7 @@ const TestwareDashboard: React.FC = () => {
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
         
-        // Use header: 1 to specify the second row as the header
-        const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-
-        // The actual headers are in the first row of the parsed data (index 0)
-        const headers = jsonData[0] as string[];
-        const rows = jsonData.slice(1);
+        const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 0 });
 
         const columnMapping: { [key: string]: keyof TestCase } = {
           "Proceso": "proceso",
@@ -348,23 +344,30 @@ const TestwareDashboard: React.FC = () => {
           "Comentarios": "comentarios"
         };
         
-        const newCases = rows.map((rowArray: any[]) => {
-          const rowObject: any = {};
-          headers.forEach((header: string, index: number) => {
-              const cleanHeader = header.trim();
-              const mappedKey = columnMapping[cleanHeader];
-              if (mappedKey) {
-                  rowObject[mappedKey] = rowArray[index] !== undefined ? rowArray[index] : "";
-              }
-          });
-          return rowObject;
+        const newCases = jsonData.map((row: any) => {
+            const newRow: Partial<TestCase> = {};
+            for (const key in row) {
+                const mappedKey = columnMapping[key.trim()];
+                if (mappedKey) {
+                    newRow[mappedKey] = row[key];
+                }
+            }
+            return newRow;
         })
-        .filter(obj => Object.keys(obj).length > 0) // Filter out empty rows
+        .filter(obj => Object.keys(obj).length > 0)
         .map(c => ({
           ...c,
           id: simpleUUID(),
-          estado: c.estado || 'Pendiente'
-        }));
+          estado: c.estado || 'Pendiente',
+          proceso: c.proceso || '',
+          casoPrueba: c.casoPrueba || '',
+          descripcion: c.descripcion || '',
+          datosPrueba: c.datosPrueba || '',
+          pasoAPaso: c.pasoAPaso || '',
+          resultadoEsperado: c.resultadoEsperado || '',
+          evidencia: c.evidencia || '',
+          comentarios: c.comentarios || '',
+        } as TestCase));
 
         const updatedCases = [...testCases, ...newCases];
         updateFirestoreTestCases(updatedCases);
@@ -372,7 +375,7 @@ const TestwareDashboard: React.FC = () => {
 
       } catch (error) {
         console.error("Failed to parse or upload Excel", error);
-        toast({ title: "Fallo la Carga", description: "Por favor, carga un archivo Excel válido.", variant: "destructive" });
+        toast({ title: "Fallo la Carga", description: "Por favor, carga un archivo Excel válido y con el formato correcto.", variant: "destructive" });
       }
     };
     reader.readAsArrayBuffer(file);
@@ -393,7 +396,7 @@ const TestwareDashboard: React.FC = () => {
         return tc;
     });
     updateFirestoreTestCases(updatedCases);
-  }, [testCases, toast, updateFirestoreTestCases, user]);
+  }, [testCases, updateFirestoreTestCases, user]);
   
   const handleDeleteTestCase = useCallback((id: string) => {
     const updatedCases = testCases.filter(tc => tc.id !== id);
@@ -558,7 +561,16 @@ const TestwareDashboard: React.FC = () => {
               
               {!isViewerMode && (
                 <div className="hidden sm:flex items-center space-x-2">
-                  <Button variant="outline" onClick={() => excelInputRef.current?.click()}><FileSpreadsheet /> Importar Excel</Button>
+                   <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant="outline" onClick={() => excelInputRef.current?.click()}><FileSpreadsheet /> Importar Excel</Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Columnas esperadas: Proceso, Caso de Prueba, Descripción del Caso de Prueba, Datos de Prueba Sugeridos, Paso a paso, Resultado Esperado, Estado, Evidencia, Comentarios.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                   <Button variant="outline" onClick={() => fileInputRef.current?.click()}><Upload /> Cargar JSON</Button>
                   <ImprovementReportDialog commentedCases={commentedCases} allCases={testCases} stats={stats}/>
                   <FailureReportDialog failedCases={failedCases} allCases={testCases} />
@@ -621,9 +633,18 @@ const TestwareDashboard: React.FC = () => {
                 <h2 className="text-2xl font-semibold mt-4">Sesión Lista para Colaborar</h2>
                 <p className="text-muted-foreground mt-2">Carga un archivo JSON, importa un Excel o comparte el código para empezar.</p>
                  <div className="mt-6 flex justify-center gap-4">
-                    <Button onClick={() => excelInputRef.current?.click()} className="bg-primary hover:bg-primary/90">
-                      <FileSpreadsheet className="mr-2" /> Importar desde Excel
-                    </Button>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                           <Button onClick={() => excelInputRef.current?.click()} className="bg-primary hover:bg-primary/90">
+                            <FileSpreadsheet className="mr-2" /> Importar desde Excel
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Columnas esperadas: Proceso, Caso de Prueba, Descripción del Caso de Prueba, Datos de Prueba Sugeridos, Paso a paso, Resultado Esperado, Estado, Evidencia, Comentarios.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                     <Button onClick={() => fileInputRef.current?.click()} variant="secondary">
                       <Upload className="mr-2" /> Cargar archivo JSON
                     </Button>
@@ -934,7 +955,6 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
 
   const handleEvidenceChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (isViewerMode) return;
-
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -971,7 +991,6 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
   };
 
   const isDataUrl = testCase.evidencia && testCase.evidencia.startsWith('data:image');
-  const evidenceInputRef = useRef<HTMLInputElement>(null);
 
   return (
     <Card className="overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300">
@@ -1064,21 +1083,6 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
                 className="bg-background/50"
                 readOnly={isViewerMode}
               />
-               {!isViewerMode && (
-                <>
-                  <input
-                    type="file"
-                    ref={evidenceInputRef}
-                    className="hidden"
-                    accept="image/*"
-                    onChange={handleEvidenceChange}
-                    disabled={isViewerMode}
-                  />
-                  <Button variant="outline" onClick={() => evidenceInputRef.current?.click()} disabled={isViewerMode}>
-                    <Upload className="h-4 w-4"/>
-                  </Button>
-                </>
-              )}
             </div>
             {isDataUrl ? (
               <a href={testCase.evidencia} target="_blank" rel="noopener noreferrer" className="mt-2 block">

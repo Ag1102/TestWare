@@ -13,7 +13,6 @@ export interface TestCase {
   estado: TestCaseStatus;
   updatedBy?: string;
   updatedAt?: any;
-  evidenciaFile?: File;
 }
 
 export interface Participant {

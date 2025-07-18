@@ -58,6 +58,7 @@ import * as XLSX from 'xlsx';
 const getImageDimensions = (uri: string): Promise<{ width: number; height: number }> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
+    img.crossOrigin = "Anonymous"; 
     img.onload = () => {
       resolve({ width: img.width, height: img.height });
     };
@@ -309,9 +310,7 @@ const TestwareDashboard: React.FC = () => {
     if (sessionCode) {
       try {
         const sessionDocRef = doc(db, "sessions", sessionCode);
-        // Clean up non-serializable data before sending to Firestore
-        const casesToSave = updatedCases.map(({ evidenciaFile, ...rest }) => rest);
-        await updateDoc(sessionDocRef, { testCases: casesToSave });
+        await updateDoc(sessionDocRef, { testCases: updatedCases });
       } catch (error) {
         console.error("Failed to sync with Firestore:", error);
         toast({ title: "Error de Sincronización", description: "No se pudieron guardar los cambios. La imagen puede ser demasiado grande.", variant: "destructive" });
@@ -456,35 +455,35 @@ const TestwareDashboard: React.FC = () => {
 
 
   const handleUpdate = useCallback((id: string, field: keyof TestCase, value: string | TestCaseStatus | File) => {
-    const updatedCases = testCases.map(tc => {
+    let casesToUpdate = [...testCases];
+
+    if (field === 'evidencia' && value instanceof File) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string;
+        const finalCases = testCases.map(tc => 
+          tc.id === id ? { ...tc, evidencia: dataUrl } : tc
+        );
+        updateFirestoreTestCases(finalCases);
+      };
+      reader.readAsDataURL(value);
+      // We don't update the state here, we let the async operation finish and update firestore
+      return;
+    }
+
+    casesToUpdate = testCases.map(tc => {
         if (tc.id === id) {
             const newTc: TestCase = { ...tc, [field]: value };
             if (field === 'estado') {
                 newTc.updatedBy = user?.email || 'System';
                 newTc.updatedAt = Timestamp.fromDate(new Date());
             }
-            if (field === 'evidenciaFile' && value instanceof File) {
-              const reader = new FileReader();
-              reader.onload = (e) => {
-                const dataUrl = e.target?.result as string;
-                const finalCases = testCases.map(t => t.id === id ? {...newTc, evidencia: dataUrl, evidenciaFile: undefined} : t);
-                updateFirestoreTestCases(finalCases);
-              };
-              reader.readAsDataURL(value);
-              // Return immediately as the update will be async
-              return {...newTc, evidenciaFile: value };
-            }
             return newTc;
         }
         return tc;
     });
 
-    if (!(value instanceof File)) {
-      updateFirestoreTestCases(updatedCases);
-    } else {
-      setTestCases(updatedCases); // Show loading state or file name while processing
-    }
-
+    updateFirestoreTestCases(casesToUpdate);
   }, [testCases, updateFirestoreTestCases, user]);
   
   const handleDeleteTestCase = useCallback((id: string) => {
@@ -1084,7 +1083,7 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
   const handleEvidenceSelect = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file && onUpdate) {
-      onUpdate(testCase.id, 'evidenciaFile', file);
+      onUpdate(testCase.id, 'evidencia', file);
     }
   };
 
@@ -1172,11 +1171,11 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
             <div className="flex items-center gap-2">
               <Input
                   key={`evidence-url-${testCase.id}`}
-                  defaultValue={testCase.evidenciaFile ? testCase.evidenciaFile.name : testCase.evidencia}
+                  defaultValue={testCase.evidencia}
                   onBlur={e => onUpdate?.(testCase.id, 'evidencia', e.target.value)}
-                  placeholder={testCase.evidenciaFile ? testCase.evidenciaFile.name : 'Pega la URL o carga una imagen'}
+                  placeholder={'Pega la URL o carga una imagen'}
                   className="bg-background/50 flex-grow"
-                  readOnly={isViewerMode || !!testCase.evidenciaFile}
+                  readOnly={isViewerMode}
                 />
               {!isViewerMode && (
                 <>

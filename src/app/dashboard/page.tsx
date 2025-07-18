@@ -50,16 +50,14 @@ import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from "@/lib/utils";
-import { db, auth, storage } from "@/lib/firebase";
+import { db, auth } from "@/lib/firebase";
 import { doc, setDoc, getDoc, onSnapshot, updateDoc, Timestamp, collection, addDoc, deleteDoc, query, where, getDocs, writeBatch, serverTimestamp } from "firebase/firestore";
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import * as XLSX from 'xlsx';
 
 const getImageDimensions = (uri: string): Promise<{ width: number; height: number }> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.crossOrigin = "anonymous";
     img.onload = () => {
       resolve({ width: img.width, height: img.height });
     };
@@ -1051,40 +1049,6 @@ const ViewerDashboardContent = ({ stats, cases, currentFilter, setFilter }) => {
 };
 
 const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false }: { testCase: TestCase, onUpdate?: Function, onDelete?: Function, isViewerMode?: boolean }) => {
-  const { toast } = useToast();
-  const evidenceInputRef = useRef<HTMLInputElement>(null);
-  const [isUploading, setIsUploading] = useState(false);
-
-  const handleEvidenceSelect = (e: ChangeEvent<HTMLInputElement>) => {
-    if (isViewerMode || !storage) return;
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-        toast({ title: "Archivo inválido", description: "Por favor, selecciona un archivo de imagen.", variant: "destructive" });
-        return;
-    }
-
-    if (file.size > 5 * 1024 * 1024) { // 5MB limit
-      toast({ title: "Archivo demasiado grande", description: "Por favor, carga una imagen de menos de 5MB.", variant: "destructive" });
-      return;
-    }
-
-    setIsUploading(true);
-    const storageRef = ref(storage, `evidence/${testCase.id}/${file.name}`);
-    uploadBytes(storageRef, file).then((snapshot) => {
-        getDownloadURL(snapshot.ref).then((downloadURL) => {
-            onUpdate?.(testCase.id, 'evidencia', downloadURL);
-            toast({ title: "Evidencia Actualizada", description: "La imagen se ha subido correctamente." });
-        });
-    }).catch(error => {
-        console.error("Error uploading image:", error);
-        toast({ title: "Error de subida", description: "No se pudo subir la imagen.", variant: "destructive" });
-    }).finally(() => {
-        setIsUploading(false);
-    });
-  };
-  
   const formatTimestamp = (timestamp: any) => {
     if (!timestamp) return '';
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -1095,8 +1059,7 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
     }
   };
 
-  const isDataUrl = testCase.evidencia && testCase.evidencia.startsWith('data:image');
-  const isFirebaseUrl = testCase.evidencia && testCase.evidencia.includes('firebasestorage.googleapis.com');
+  const isImageUrl = testCase.evidencia && (testCase.evidencia.startsWith('data:image') || testCase.evidencia.startsWith('http'));
 
   return (
     <Card className="overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300">
@@ -1179,24 +1142,16 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false 
 
           <div className="space-y-2">
             <Label className="font-semibold">Evidencia</Label>
-            <div className="flex gap-2">
-              <Input
+             <Input
                 key={`evidence-url-${testCase.id}`}
                 defaultValue={testCase.evidencia}
                 onBlur={e => onUpdate?.(testCase.id, 'evidencia', e.target.value)}
-                placeholder={'Pega la URL o sube una imagen'}
+                placeholder={'Pega la URL de la imagen o Data URI'}
                 className="bg-background/50 flex-grow"
                 readOnly={isViewerMode}
               />
-              <input type="file" ref={evidenceInputRef} onChange={handleEvidenceSelect} accept="image/*" className="hidden" />
-              {!isViewerMode && (
-                  <Button variant="outline" size="icon" onClick={() => evidenceInputRef.current?.click()} disabled={isUploading}>
-                      {isUploading ? <Loader2 className="animate-spin" /> : <Upload className="h-4 w-4" />}
-                  </Button>
-              )}
-            </div>
-
-            {isDataUrl || isFirebaseUrl ? (
+            
+            {isImageUrl ? (
               <a href={testCase.evidencia} target="_blank" rel="noopener noreferrer" className="mt-2 block">
                 <img src={testCase.evidencia} alt="Vista previa de la evidencia" data-ai-hint="evidence screenshot" className="w-full rounded-md object-cover max-h-48 hover:opacity-80 transition-opacity border" />
               </a>
@@ -1377,7 +1332,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                 renderField('Comentarios de QA:', tc.comentarios, false, [192, 57, 43]);
                 
                 addTextBox('Evidencia:', { fontSize: 10, fontStyle: 'bold' });
-                if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.includes('firebasestorage'))) {
+                if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.startsWith('http'))) {
                     try {
                         const { width, height } = await getImageDimensions(tc.evidencia);
                         const imgWidth = contentWidth / 2;
@@ -1414,7 +1369,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
         
         if (pieChartEl && barChartEl) {
           const addChart = async (element: HTMLElement) => {
-              const canvas = await html2canvas(element, { scale: 3, backgroundColor: '#ffffff', useCORS: true });
+              const canvas = await html2canvas(element, { scale: 3, backgroundColor: '#ffffff' });
               return canvas.toDataURL('image/png', 1.0);
           };
           
@@ -1651,7 +1606,7 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
                 fieldsToEstimate.forEach(field => {
                   estimatedHeight += (pdf.splitTextToSize(field || '-', contentWidth).length * (pdf.getLineHeight() / pdf.internal.scaleFactor) + 4);
                 })
-                 if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.includes('firebasestorage'))) {
+                 if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.startsWith('http'))) {
                     estimatedHeight += 50;
                 } else if (tc.evidencia) {
                     estimatedHeight += 15;
@@ -1684,7 +1639,7 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
                 }
                 
                 addTextBox('Evidencia:', { fontSize: 10, fontStyle: 'bold' });
-                 if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.includes('firebasestorage'))) {
+                 if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.startsWith('http'))) {
                     try {
                         const { width, height } = await getImageDimensions(tc.evidencia);
                         const imgWidth = contentWidth / 2;
@@ -1720,7 +1675,7 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
         
         if (pieChartEl && barChartEl) {
           const addChart = async (element: HTMLElement) => {
-              const canvas = await html2canvas(element, { scale: 3, backgroundColor: '#ffffff', useCORS: true });
+              const canvas = await html2canvas(element, { scale: 3, backgroundColor: '#ffffff' });
               return canvas.toDataURL('image/png', 1.0);
           };
           

@@ -56,19 +56,6 @@ import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import * as XLSX from 'xlsx';
 
-const resolveStorageUrl = (path: string): string => {
-  if (!path.startsWith('storage://')) {
-    return path;
-  }
-  const bucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
-  if (!bucket) {
-    console.error("Firebase Storage bucket is not configured in environment variables.");
-    return '';
-  }
-  const filePath = path.replace('storage://', '');
-  return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(filePath)}?alt=media`;
-};
-
 const getImageDimensions = (uri: string): Promise<{ width: number; height: number }> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -80,7 +67,7 @@ const getImageDimensions = (uri: string): Promise<{ width: number; height: numbe
       console.error("Failed to load image for dimension calculation", uri, err);
       reject(new Error("Failed to load image for dimension calculation"));
     };
-    img.src = resolveStorageUrl(uri);
+    img.src = uri;
   });
 };
 
@@ -1106,14 +1093,13 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false,
         const fileExtension = file.name.split('.').pop();
         const randomId = Math.random().toString(36).substring(2, 10);
         const uniqueFileName = `${randomId}.${fileExtension}`;
-
         const imageRef = storageRef(storage, `sessions/${sessionCode}/${uniqueFileName}`);
-        await uploadBytes(imageRef, file);
         
-        const storagePath = `storage://${imageRef.fullPath}`;
+        await uploadBytes(imageRef, file);
+        const downloadUrl = await getDownloadURL(imageRef);
         
         const updatedCases = allTestCases.map(tc => 
-            tc.id === testCase.id ? { ...tc, evidencia: storagePath } : tc
+            tc.id === testCase.id ? { ...tc, evidencia: downloadUrl } : tc
         );
         await updateFirestoreTestCases(updatedCases);
 
@@ -1126,8 +1112,7 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false,
     }
   };
   
-  const finalImageUrl = resolveStorageUrl(testCase.evidencia);
-  const isImageUrl = finalImageUrl && (finalImageUrl.startsWith('data:image') || finalImageUrl.startsWith('http'));
+  const isImageUrl = testCase.evidencia && (testCase.evidencia.startsWith('data:image') || testCase.evidencia.startsWith('http'));
 
   return (
     <Card className="overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300">
@@ -1237,8 +1222,8 @@ const TestCaseCard = memo(({ testCase, onUpdate, onDelete, isViewerMode = false,
             </div>
             
             {isImageUrl ? (
-              <a href={finalImageUrl} target="_blank" rel="noopener noreferrer" className="mt-2 block">
-                <img src={finalImageUrl} alt="Vista previa de la evidencia" data-ai-hint="evidence screenshot" className="w-full rounded-md object-cover max-h-48 hover:opacity-80 transition-opacity border" />
+              <a href={testCase.evidencia} target="_blank" rel="noopener noreferrer" className="mt-2 block">
+                <img src={testCase.evidencia} alt="Vista previa de la evidencia" data-ai-hint="evidence screenshot" className="w-full rounded-md object-cover max-h-48 hover:opacity-80 transition-opacity border" />
               </a>
             ) : testCase.evidencia && (
               <a href={testCase.evidencia} target="_blank" rel="noopener noreferrer" className="mt-2 text-primary hover:underline text-sm break-all">
@@ -1387,7 +1372,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                 fieldsToEstimate.forEach(field => {
                   estimatedHeight += (pdf.splitTextToSize(field || '-', contentWidth).length * (pdf.getLineHeight() / pdf.internal.scaleFactor) + 4);
                 })
-                if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.startsWith('http') || tc.evidencia.startsWith('storage://'))) {
+                if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.startsWith('http'))) {
                     estimatedHeight += 50;
                 } else if (tc.evidencia) {
                     estimatedHeight += 15;
@@ -1417,10 +1402,9 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                 renderField('Comentarios de QA:', tc.comentarios, false, [192, 57, 43]);
                 
                 addTextBox('Evidencia:', { fontSize: 10, fontStyle: 'bold' });
-                if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.startsWith('http') || tc.evidencia.startsWith('storage://'))) {
+                if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.startsWith('http'))) {
                     try {
-                        const finalUrl = resolveStorageUrl(tc.evidencia);
-                        const { width, height } = await getImageDimensions(finalUrl);
+                        const { width, height } = await getImageDimensions(tc.evidencia);
                         const imgWidth = contentWidth / 2;
                         const imgHeight = (height * imgWidth) / width;
                         
@@ -1428,7 +1412,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
                           pdf.addPage();
                           y = margin;
                         }
-                        pdf.addImage(finalUrl, 'PNG', margin, y, imgWidth, imgHeight, undefined, 'FAST');
+                        pdf.addImage(tc.evidencia, 'PNG', margin, y, imgWidth, imgHeight, undefined, 'FAST');
                         y += imgHeight + 5;
                     } catch (e) { 
                         addTextBox('Error al cargar imagen. La evidencia puede estar corrupta o no ser una imagen.', { color: [192, 57, 43], fontSize: 10 });
@@ -1692,7 +1676,7 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
                 fieldsToEstimate.forEach(field => {
                   estimatedHeight += (pdf.splitTextToSize(field || '-', contentWidth).length * (pdf.getLineHeight() / pdf.internal.scaleFactor) + 4);
                 })
-                 if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.startsWith('http') || tc.evidencia.startsWith('storage://'))) {
+                 if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.startsWith('http'))) {
                     estimatedHeight += 50;
                 } else if (tc.evidencia) {
                     estimatedHeight += 15;
@@ -1725,17 +1709,16 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
                 }
                 
                 addTextBox('Evidencia:', { fontSize: 10, fontStyle: 'bold' });
-                 if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.startsWith('http') || tc.evidencia.startsWith('storage://'))) {
+                 if (tc.evidencia && (tc.evidencia.startsWith('data:image') || tc.evidencia.startsWith('http'))) {
                     try {
-                        const finalUrl = resolveStorageUrl(tc.evidencia);
-                        const { width, height } = await getImageDimensions(finalUrl);
+                        const { width, height } = await getImageDimensions(tc.evidencia);
                         const imgWidth = contentWidth / 2;
                         const imgHeight = (height * imgWidth) / width;
                         if (y + imgHeight > pdfHeight - margin) {
                           pdf.addPage();
                           y = margin;
                         }
-                        pdf.addImage(finalUrl, 'PNG', margin, y, imgWidth, imgHeight, undefined, 'FAST');
+                        pdf.addImage(tc.evidencia, 'PNG', margin, y, imgWidth, imgHeight, undefined, 'FAST');
                         y += imgHeight + 5;
                     } catch (e) {
                          addTextBox('Error al cargar imagen. La evidencia puede estar corrupta o no ser una imagen.', { color: [192, 57, 43], fontSize: 10 });

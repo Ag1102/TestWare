@@ -454,19 +454,22 @@ const TestwareDashboard: React.FC = () => {
 
 
   const handleUpdate = useCallback((id: string, field: keyof TestCase, value: any) => {
-    const updatedCases = testCases.map(tc => {
-      if (tc.id === id) {
-        const newTc: TestCase = { ...tc, [field]: value };
-        if (field === 'estado') {
-          newTc.updatedBy = user?.email || 'System';
-          newTc.updatedAt = Timestamp.fromDate(new Date());
+    setTestCases(currentCases => {
+      const updatedCases = currentCases.map(tc => {
+        if (tc.id === id) {
+          const newTc: TestCase = { ...tc, [field]: value };
+          if (field === 'estado') {
+            newTc.updatedBy = user?.email || 'System';
+            newTc.updatedAt = Timestamp.fromDate(new Date());
+          }
+          return newTc;
         }
-        return newTc;
-      }
-      return tc;
+        return tc;
+      });
+      updateFirestoreTestCases(updatedCases);
+      return updatedCases;
     });
-    updateFirestoreTestCases(updatedCases);
-  }, [testCases, updateFirestoreTestCases, user]);
+  }, [updateFirestoreTestCases, user]);
   
   const handleDeleteTestCase = useCallback((id: string) => {
     const updatedCases = testCases.filter(tc => tc.id !== id);
@@ -1292,7 +1295,7 @@ const FailureReportDialog: React.FC<{ failedCases: TestCase[]; allCases: TestCas
     }
     setIsLoading(true);
     setImpactAnalysis(null);
-    const aiCases = failedCases.map(({ id, ...rest }) => ({ ...rest, estado: 'Fallido' as const }));
+    const aiCases = failedCases.map(({ id, updatedAt, updatedBy, ...rest }) => ({ ...rest, estado: 'Fallido' as const }));
     
     try {
       const result = await generateReportAction({ failedTestCases: aiCases, reportDescription });
@@ -1607,7 +1610,7 @@ const ImprovementReportDialog: React.FC<{ commentedCases: TestCase[]; allCases: 
     }
     setIsLoading(true);
     setAnalysis(null);
-    const aiCases = commentedCases.map(({ id, ...rest }) => rest);
+    const aiCases = commentedCases.map(({ id, updatedAt, updatedBy, ...rest }) => rest);
     
     try {
       const result = await generateImprovementReportAction({ commentedTestCases: aiCases, reportDescription });
